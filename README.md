@@ -1,6 +1,6 @@
 # LazySlurm
 
-A terminal UI for SLURM job management. Like the awesome [lazygit](https://github.com/jesseduffield/lazygit) but for HPC.
+A terminal UI for [SLURM](https://slurm.schedmd.com/overview.html) job management. Like the awesome [lazygit](https://github.com/jesseduffield/lazygit) but for HPC.
 
 ## Controls
 
