@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  slurm:
+    image: giovtorres/slurm-docker:20.11.9
+    container_name: lazyslurm_dev
+    hostname: slurmctld
+    ports:
+      - "6817:6817"  # slurmctld port
+      - "6818:6818"  # slurmd port
+    volumes:
+      - ./test_jobs:/home/slurm/jobs
+      - ./test_data:/home/slurm/data
+      - slurm_logs:/var/log/slurm
+    environment:
+      - CLUSTER_NAME=lazyslurm_dev
+      - SLURM_CONF=/usr/local/etc/slurm.conf
+    stdin_open: true
+    tty: true
+    command: |
+      bash -c "
+        # Start SLURM services
+        sudo service munge start
+        sudo service slurmdbd start
+        sudo service slurmctld start
+        sudo service slurmd start
+        
+        # Wait a moment for services to start
+        sleep 5
+        
+        # Create a default partition and node
+        sudo scontrol update partitionname=debug default=yes state=up
+        sudo scontrol update nodename=slurmctld state=resume
+        
+        # Keep container running
+        tail -f /dev/null
+      "
+
+volumes:
+  slurm_logs:
