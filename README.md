@@ -25,25 +25,23 @@ gah install hill/lazyslurm
 
 ## Development
 
-Requires Docker and [just](https://github.com/casey/just).
+Requires SLURM and [just](https://github.com/casey/just).
 
 ```bash
-# Start test environment
+# Install SLURM
+brew install slurm
+
+# Start local cluster (terminal 1)
 just slurm_up
+
+# Submit test jobs (terminal 2)
 just slurm_populate
 
 # Run LazySlurm
 just run
 ```
 
-```bash
-just               # list commands
-just slurm_up      # start SLURM container
-just slurm_status  # check cluster
-just run           # run LazySlurm
-```
-
-The Docker setup gives you a working SLURM cluster with sample jobs. Real squeue/scontrol commands, real job IDs, real log paths.
+The local SLURM setup runs real slurmctld/slurmd daemons on your machine. Real commands, real job IDs, real log paths in `dev/test_data/`.
 
 ## Why This Exists
 
