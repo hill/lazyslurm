@@ -31,16 +31,6 @@ just run           # run LazySlurm
 
 The Docker setup gives you a working SLURM cluster with sample jobs. Real squeue/scontrol commands, real job IDs, real log paths.
 
-## Architecture
-
-```
-models/     # Job structs and state
-slurm/      # Command execution and parsing  
-ui/         # TUI components and app logic
-```
-
-Key insight: Parse actual SLURM output instead of guessing paths. `scontrol show job` tells us exactly where log files live.
-
 ## Why This Exists
 
 SLURM's CLI is powerful but clunky for monitoring. This gives you the lazygit experience: see state, take actions, see new state. Real-time updates, keyboard navigation, visual feedback.
