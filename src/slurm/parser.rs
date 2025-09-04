@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
 use std::collections::HashMap;
@@ -167,6 +167,10 @@ impl SlurmParser {
             paths.push(format!("slurm-{}.out", job.job_id));
             paths.push(format!("slurm-{}.err", job.job_id));
         }
+        
+        // Additional fallback: Check /tmp for logs (common in dev environments)
+        paths.push(format!("/tmp/slurm-{}.out", job.job_id));
+        paths.push(format!("/tmp/slurm-{}.err", job.job_id));
         
         paths
     }

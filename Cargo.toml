@@ -34,3 +34,8 @@ anyhow = "1.0"
 
 # Regex for parsing
 regex = "1.10"
+
+[profile.dev]
+opt-level = 0
+debug = true
+incremental = true

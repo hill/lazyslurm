@@ -1,12 +1,14 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
+use std::fs;
 
 use crate::models::{Job, JobState};
+use crate::slurm::SlurmParser;
 use crate::ui::App;
 
 pub fn render_app(frame: &mut Frame, app: &App) {
@@ -35,18 +37,20 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     // Render jobs list
     render_jobs_list(frame, app, main_chunks[0]);
 
-    // Right side - split vertically for details and logs
+    // Right side - split vertically for details, logs, and summary
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(70),  // Job details
-            Constraint::Percentage(30),  // Quick info/logs
+            Constraint::Percentage(40),  // Job details
+            Constraint::Percentage(40),  // Job logs
+            Constraint::Percentage(20),  // Quick info/summary
         ])
         .split(main_chunks[1]);
 
-    // Render details and quick info
+    // Render details, logs, and summary
     render_job_details(frame, app, right_chunks[0]);
-    render_quick_info(frame, app, right_chunks[1]);
+    render_job_logs(frame, app, right_chunks[1]);
+    render_quick_info(frame, app, right_chunks[2]);
 
     // Render help bar
     render_help_bar(frame, chunks[2]);
@@ -124,19 +128,50 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
-    let content = if let Some(job) = app.get_selected_job() {
-        format_job_details(job)
+    let details = if let Some(job) = app.get_selected_job() {
+        Paragraph::new(format_job_details(job))
+            .block(Block::default().title("Job Details").borders(Borders::ALL))
+            .wrap(Wrap { trim: true })
     } else if app.job_list.jobs.is_empty() {
-        "No jobs found.\n\nTry running: lazyslurm --user <username>\nor check if SLURM is available.".to_string()
+        let lines = vec![
+            Line::from(""),
+            Line::from("        L A Z Y S L U R M       "),
+            Line::from("    Tom Hill 2025 - tom@hill.xyz"),
+            Line::from(""),
+            Line::from("    No jobs found."),
+            Line::from(""),
+            Line::from("    Try running: lazyslurm --user <username>"),
+            Line::from("    or check if SLURM is available."),
+            Line::from(""),
+            Line::from(Span::styled(
+                "    \"We do not remember days; we remember moments.\" - Cesare Pavese",
+                Style::default().add_modifier(Modifier::ITALIC)
+            )),
+        ];
+        Paragraph::new(lines)
+            .block(Block::default().title("Job Details").borders(Borders::ALL))
+            .wrap(Wrap { trim: false })
     } else {
-        "Select a job to view details".to_string()
+        Paragraph::new("Select a job to view details")
+            .block(Block::default().title("Job Details").borders(Borders::ALL))
+            .wrap(Wrap { trim: true })
     };
 
-    let details = Paragraph::new(content)
-        .block(Block::default().title("Job Details").borders(Borders::ALL))
+    frame.render_widget(details, area);
+}
+
+fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
+    let content = if let Some(job) = app.get_selected_job() {
+        read_job_logs(job)
+    } else {
+        "Select a job to view logs".to_string()
+    };
+
+    let logs = Paragraph::new(content)
+        .block(Block::default().title("Job Logs").borders(Borders::ALL))
         .wrap(Wrap { trim: true });
 
-    frame.render_widget(details, area);
+    frame.render_widget(logs, area);
 }
 
 fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
@@ -145,11 +180,10 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
     let completed_count = app.completed_jobs().len();
     
     let content = format!(
-        "Running: {} | Pending: {} | Completed: {}\n\nLast updated: {:.1}s ago",
+        "Running: {} | Pending: {} | Completed: {}",
         running_count,
         pending_count,
-        completed_count,
-        app.last_refresh.elapsed().as_secs_f64()
+        completed_count
     );
 
     let quick_info = Paragraph::new(content)
@@ -170,10 +204,22 @@ fn render_help_bar(frame: &mut Frame, area: Rect) {
 fn format_job_details(job: &Job) -> String {
     let mut details = Vec::new();
     
+    let state_description = match job.state {
+        JobState::Running => "Running",
+        JobState::Pending => "Pending", 
+        JobState::Completed => "Completed",
+        JobState::Cancelled => "Cancelled",
+        JobState::Failed => "Failed",
+        JobState::Timeout => "Timeout",
+        JobState::NodeFail => "Node Fail",
+        JobState::Preempted => "Preempted",
+        JobState::Unknown(_) => "Unknown",
+    };
+    
     details.push(format!("Job ID: {}", job.display_id()));
     details.push(format!("Name: {}", job.name));
     details.push(format!("User: {}", job.user));
-    details.push(format!("State: {}", job.state));
+    details.push(format!("State: {} ({})", job.state, state_description));
     details.push(format!("Partition: {}", job.partition));
 
     if let Some(nodes) = job.nodes {
@@ -213,6 +259,41 @@ fn format_job_details(job: &Job) -> String {
     }
 
     details.join("\n")
+}
+
+fn read_job_logs(job: &Job) -> String {
+    let log_paths = SlurmParser::get_job_log_paths(job);
+    
+    // Try each potential log path
+    for path in &log_paths {
+        if let Ok(content) = fs::read_to_string(path) {
+            if content.is_empty() {
+                return format!("Log file exists but is empty: {}", path);
+            }
+            
+            // Show last 20 lines (tail-like behavior)
+            let lines: Vec<&str> = content.lines().collect();
+            let start = lines.len().saturating_sub(20);
+            let tail_lines = &lines[start..];
+            
+            return format!(
+                "Log file: {}\n{}\n{}",
+                path,
+                "-".repeat(50),
+                tail_lines.join("\n")
+            );
+        }
+    }
+    
+    // No logs found
+    if log_paths.is_empty() {
+        "No log file paths available".to_string()
+    } else {
+        format!(
+            "No logs found. Checked paths:\n{}",
+            log_paths.join("\n")
+        )
+    }
 }
 
 fn truncate(s: &str, max_len: usize) -> String {

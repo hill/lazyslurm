@@ -4,4 +4,3 @@ pub mod events;
 
 pub use app::*;
 pub use components::*;
-pub use events::*;

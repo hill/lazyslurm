@@ -19,9 +19,9 @@ slurm_shell:
 # Submit test jobs from host
 slurm_populate:
     @echo "Submitting test jobs..."
-    docker exec lazyslurm_dev sbatch --wrap="sleep 60; echo Job 1 done" --job-name=test_job_1
-    docker exec lazyslurm_dev sbatch --wrap="sleep 120; echo Job 2 done" --job-name=long_job
-    docker exec lazyslurm_dev sbatch --wrap="sleep 30; echo Job 3 done" --job-name=quick_job
+    docker exec lazyslurm_dev sbatch --wrap="echo 'Starting job 1...'; i=1; while [ \$i -le 30 ]; do echo 'Job 1 progress: step '\$i'/30'; sleep 2; i=\$((i+1)); done; echo 'Job 1 completed!'" --job-name=test_job_1 --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
+    docker exec lazyslurm_dev sbatch --wrap="echo 'Starting long job...'; i=1; while [ \$i -le 60 ]; do echo 'Long job processing batch '\$i'/60'; sleep 2; i=\$((i+1)); done; echo 'Long job finished!'" --job-name=long_job --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
+    docker exec lazyslurm_dev sbatch --wrap="echo 'Quick job starting...'; i=1; while [ \$i -le 15 ]; do echo 'Quick task '\$i'/15 complete'; sleep 1; i=\$((i+1)); done; echo 'Quick job done!'" --job-name=quick_job --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
     @echo "Jobs submitted!"
 
 # Check SLURM status
