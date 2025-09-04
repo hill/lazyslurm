@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create slurm user
-RUN useradd -m -s /bin/bash slurm
+# Configure existing slurm user
 RUN usermod -aG sudo slurm
+RUN mkdir -p /home/slurm && chown slurm:slurm /home/slurm
 
 # Create necessary directories
 RUN mkdir -p /var/spool/slurm \
