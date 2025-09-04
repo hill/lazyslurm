@@ -41,7 +41,7 @@ cargo run
 just slurm_populate
 ```
 
-Your source code is mounted into the container so changes are immediately available. Real SLURM commands, real job IDs, real behavior.
+Your source code is mounted into the container so changes are immediately available.
 
 ## Why This Exists
 
