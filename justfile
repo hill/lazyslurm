@@ -5,17 +5,18 @@
 default:
     @just --list --unsorted
 
-# Start the SLURM test environment
+# Build and start the SLURM test environment
 slurm_up:
-    mkdir -p test_jobs test_data
-    docker-compose up -d
+    mkdir -p dev/test_jobs dev/test_data
+    cd dev && docker-compose build
+    cd dev && docker-compose up -d
     @echo "Waiting for SLURM services to start..."
-    sleep 10
+    sleep 15
     @echo "SLURM environment ready!"
 
 # Stop the SLURM test environment  
 slurm_down:
-    docker-compose down
+    cd dev && docker-compose down
 
 # Get shell access to SLURM container
 slurm_shell:
@@ -53,7 +54,7 @@ test:
 
 # Clean up everything (containers, volumes, build artifacts)
 clean:
-    docker-compose down -v
+    cd dev && docker-compose down -v
     docker system prune -f
     cargo clean
 
