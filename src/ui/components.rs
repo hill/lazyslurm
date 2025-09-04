@@ -138,13 +138,14 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
             Line::from("        L A Z Y S L U R M       "),
             Line::from("    Tom Hill 2025 - tom@hill.xyz"),
             Line::from(""),
-            Line::from("    No jobs found."),
             Line::from(""),
-            Line::from("    Try running: lazyslurm --user <username>"),
-            Line::from("    or check if SLURM is available."),
+            Line::from("No jobs found."),
+            Line::from(""),
+            Line::from("Try running: lazyslurm --user <username>"),
+            Line::from("or check if SLURM is available."),
             Line::from(""),
             Line::from(Span::styled(
-                "    \"We do not remember days; we remember moments.\" - Cesare Pavese",
+                "\"We do not remember days; we remember moments.\" - Cesare Pavese",
                 Style::default().add_modifier(Modifier::ITALIC)
             )),
         ];
