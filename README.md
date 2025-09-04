@@ -9,6 +9,20 @@ A terminal UI for SLURM job management. Like the awesome [lazygit](https://githu
 - `r` refresh
 - `c` cancel job
 
+## Installation
+
+### Binary Releases
+
+### Homebrew
+
+### Cargo
+
+### Gah
+
+```sh
+gah install hill/lazyslurm
+```
+
 ## Development
 
 Requires Docker and [just](https://github.com/casey/just).
