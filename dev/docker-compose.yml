@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  slurm:
+    build:
+      context: ../
+      dockerfile: dev/Dockerfile
+    container_name: lazyslurm_dev
+    hostname: slurmctld
+    volumes:
+      # Mount your entire project into the container
+      - ../:/workspace
+      # Mount cargo registry to avoid re-downloading
+      - ~/.cargo/registry:/root/.cargo/registry
+      - ~/.cargo/git:/root/.cargo/git
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    privileged: true

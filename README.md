@@ -25,23 +25,23 @@ gah install hill/lazyslurm
 
 ## Development
 
-Requires SLURM and [just](https://github.com/casey/just).
+Requires Docker and [just](https://github.com/casey/just).
 
 ```bash
-# Install SLURM
-brew install slurm
-
-# Start local cluster (terminal 1)
+# Start SLURM container
 just slurm_up
 
-# Submit test jobs (terminal 2)
-just slurm_populate
+# Get into container for development
+just slurm_shell
 
-# Run LazySlurm
-just run
+# Inside container: your code is at /workspace
+cargo run
+
+# Submit test jobs (from host or container)
+just slurm_populate
 ```
 
-The local SLURM setup runs real slurmctld/slurmd daemons on your machine. Real commands, real job IDs, real log paths in `dev/test_data/`.
+Your source code is mounted into the container so changes are immediately available. Real SLURM commands, real job IDs, real behavior.
 
 ## Why This Exists
 

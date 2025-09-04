@@ -5,24 +5,34 @@
 default:
     @just --list --unsorted
 
-# Start local SLURM cluster
+# Build and start SLURM development environment
 slurm_up:
-    @echo "Starting local SLURM cluster..."
-    dev/start_local_slurm.sh
+    cd dev && docker-compose build
+    cd dev && docker-compose up -d
+    @echo "SLURM container started!"
+    @echo "Get shell: just slurm_shell"
 
-# Submit test jobs to local SLURM
+# Get into SLURM container for development
+slurm_shell:
+    docker exec -it lazyslurm_dev bash
+
+# Submit test jobs from host
 slurm_populate:
-    dev/submit_test_jobs.sh
+    @echo "Submitting test jobs..."
+    docker exec lazyslurm_dev sbatch --wrap="sleep 60; echo Job 1 done" --job-name=test_job_1
+    docker exec lazyslurm_dev sbatch --wrap="sleep 120; echo Job 2 done" --job-name=long_job
+    docker exec lazyslurm_dev sbatch --wrap="sleep 30; echo Job 3 done" --job-name=quick_job
+    @echo "Jobs submitted!"
 
 # Check SLURM status
 slurm_status:
-    squeue -F dev/local_slurm.conf
+    docker exec lazyslurm_dev squeue
     @echo ""
-    sinfo -F dev/local_slurm.conf
+    docker exec lazyslurm_dev sinfo
 
-# Run LazySlurm with local SLURM
-run:
-    SLURM_CONF_FILE=dev/local_slurm.conf cargo run
+# Stop SLURM environment
+slurm_down:
+    cd dev && docker-compose down
 
 # Build and run tests
 test:
@@ -30,19 +40,10 @@ test:
 
 # Clean up everything
 clean:
-    pkill -f slurmctld || true
-    pkill -f slurmd || true
-    rm -rf /tmp/slurm
+    cd dev && docker-compose down -v
+    docker system prune -f
     cargo clean
-
-# Check if SLURM is installed
-check_slurm:
-    @echo "Checking if SLURM is installed..."
-    @which squeue || echo "❌ squeue not found - run: brew install slurm"
-    @which scontrol || echo "❌ scontrol not found - run: brew install slurm"  
-    @which scancel || echo "❌ scancel not found - run: brew install slurm"
-    @echo "✅ SLURM commands available"
 
 # Show running jobs in a watch loop
 watch_jobs:
-    watch -n 2 "squeue -F dev/local_slurm.conf"
+    watch -n 2 "docker exec lazyslurm_dev squeue"
