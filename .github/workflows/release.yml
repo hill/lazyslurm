@@ -6,23 +6,72 @@ on:
       - "v*"
 
 jobs:
-  release:
+  release-linux:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl]
     steps:
     - uses: actions/checkout@v4
     - uses: taiki-e/upload-rust-binary-action@v1
       with:
         bin: lazyslurm
-        target: |
-          x86_64-unknown-linux-gnu
-          x86_64-unknown-linux-musl
-          x86_64-apple-darwin
-          aarch64-apple-darwin
-          x86_64-pc-windows-msvc
+        target: ${{ matrix.target }}
         archive: $bin-$target
         checksum: sha256
         use-cross: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: taiki-e/upload-rust-binary-action@v1
+      with:
+        bin: lazyslurm
+        target: ${{ matrix.target }}
+        archive: $bin-$target
+        checksum: sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-msvc]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: taiki-e/upload-rust-binary-action@v1
+      with:
+        bin: lazyslurm
+        target: ${{ matrix.target }}
+        archive: $bin-$target
+        checksum: sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: [release-linux, release-macos, release-windows]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Cargo publish
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      run: |
+        cargo package --allow-dirty
+        cargo publish
