@@ -50,3 +50,37 @@ clean:
 # Show running jobs in a watch loop
 watch_jobs:
     watch -n 2 "docker exec lazyslurm_dev squeue"
+
+# Release: bump version, tag, and push
+# Usage:
+#   just release                # bump patch
+#   just release patch|minor|major
+#   just release 1.2.3          # set explicit version
+release version="patch":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Ensure clean working tree
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo "Error: Working tree has uncommitted changes." >&2
+        exit 1
+    fi
+
+    # Compute new version and update Cargo.toml via helper script
+    new_ver=$(python3 scripts/bump_version.py "$version")
+
+    echo "Bumped version to ${new_ver}"
+
+    # Update Cargo.lock to reflect new root version
+    if command -v cargo >/dev/null 2>&1; then
+        cargo generate-lockfile >/dev/null 2>&1 || cargo check -q || true
+    fi
+
+    # Commit, tag, and push
+    git add Cargo.toml Cargo.lock || git add Cargo.toml
+    git commit -m "Release v${new_ver}"
+    git tag -a "v${new_ver}" -m "Release v${new_ver}"
+    git push
+    git push --tags
+
+    echo "Release v${new_ver} pushed. GitHub Actions will build and upload binaries."
