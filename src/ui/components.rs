@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
 use std::fs;
 
@@ -16,9 +16,9 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // Status bar
-            Constraint::Min(0),     // Main content
-            Constraint::Length(3),  // Help/actions bar
+            Constraint::Length(1), // Status bar
+            Constraint::Min(0),    // Main content
+            Constraint::Length(3), // Help/actions bar
         ])
         .split(frame.area());
 
@@ -29,8 +29,8 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(40),  // Jobs list
-            Constraint::Percentage(60),  // Details/logs
+            Constraint::Percentage(40), // Jobs list
+            Constraint::Percentage(60), // Details/logs
         ])
         .split(chunks[1]);
 
@@ -41,9 +41,9 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(40),  // Job details
-            Constraint::Percentage(40),  // Job logs
-            Constraint::Percentage(20),  // Quick info/summary
+            Constraint::Percentage(40), // Job details
+            Constraint::Percentage(40), // Job logs
+            Constraint::Percentage(20), // Quick info/summary
         ])
         .split(main_chunks[1]);
 
@@ -58,28 +58,27 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut status_text = "LazySlurm".to_string();
-    
+
     if let Some(user) = &app.current_user {
         status_text.push_str(&format!(" - User: {}", user));
     }
-    
+
     status_text.push_str(&format!(" - Jobs: {}", app.job_list.jobs.len()));
-    
+
     if app.is_loading {
         status_text.push_str(" - Loading...");
     }
-    
+
     if let Some(error) = &app.error_message {
         status_text = format!("ERROR: {}", error);
     }
 
-    let status = Paragraph::new(status_text)
-        .style(if app.error_message.is_some() {
-            Style::default().fg(Color::Red)
-        } else {
-            Style::default()
-        });
-    
+    let status = Paragraph::new(status_text).style(if app.error_message.is_some() {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    });
+
     frame.render_widget(status, area);
 }
 
@@ -108,7 +107,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
             let job_id = job.display_id();
             let job_name = truncate(&job.name, 15);
             let time_used = job.time_used.as_deref().unwrap_or("--");
-            
+
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{:<12} ", job_id), Style::default()),
                 Span::styled(format!("{:<15} ", job_name), Style::default()),
@@ -146,7 +145,7 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled(
                 "\"We do not remember days; we remember moments.\" - Cesare Pavese",
-                Style::default().add_modifier(Modifier::ITALIC)
+                Style::default().add_modifier(Modifier::ITALIC),
             )),
         ];
         Paragraph::new(lines)
@@ -179,22 +178,21 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
     let running_count = app.running_jobs().len();
     let pending_count = app.pending_jobs().len();
     let completed_count = app.completed_jobs().len();
-    
+
     let content = format!(
         "Running: {} | Pending: {} | Completed: {}",
-        running_count,
-        pending_count,
-        completed_count
+        running_count, pending_count, completed_count
     );
 
-    let quick_info = Paragraph::new(content)
-        .block(Block::default().title("Summary").borders(Borders::ALL));
+    let quick_info =
+        Paragraph::new(content).block(Block::default().title("Summary").borders(Borders::ALL));
 
     frame.render_widget(quick_info, area);
 }
 
 fn render_help_bar(frame: &mut Frame, area: Rect) {
-    let help_text = "q: quit | ↑↓: navigate | r: refresh | c: cancel job | Enter: job details | ?:help";
+    let help_text =
+        "q: quit | ↑↓: navigate | r: refresh | c: cancel job | Enter: job details | ?:help";
     let help = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL))
         .style(Style::default().fg(Color::Gray));
@@ -204,10 +202,10 @@ fn render_help_bar(frame: &mut Frame, area: Rect) {
 
 fn format_job_details(job: &Job) -> String {
     let mut details = Vec::new();
-    
+
     let state_description = match job.state {
         JobState::Running => "Running",
-        JobState::Pending => "Pending", 
+        JobState::Pending => "Pending",
         JobState::Completed => "Completed",
         JobState::Cancelled => "Cancelled",
         JobState::Failed => "Failed",
@@ -216,7 +214,7 @@ fn format_job_details(job: &Job) -> String {
         JobState::Preempted => "Preempted",
         JobState::Unknown(_) => "Unknown",
     };
-    
+
     details.push(format!("Job ID: {}", job.display_id()));
     details.push(format!("Name: {}", job.name));
     details.push(format!("User: {}", job.user));
@@ -232,11 +230,17 @@ fn format_job_details(job: &Job) -> String {
     }
 
     if let Some(submit_time) = &job.submit_time {
-        details.push(format!("Submitted: {}", submit_time.format("%Y-%m-%d %H:%M:%S")));
+        details.push(format!(
+            "Submitted: {}",
+            submit_time.format("%Y-%m-%d %H:%M:%S")
+        ));
     }
 
     if let Some(start_time) = &job.start_time {
-        details.push(format!("Started: {}", start_time.format("%Y-%m-%d %H:%M:%S")));
+        details.push(format!(
+            "Started: {}",
+            start_time.format("%Y-%m-%d %H:%M:%S")
+        ));
     }
 
     if let Some(duration) = job.duration() {
@@ -264,19 +268,19 @@ fn format_job_details(job: &Job) -> String {
 
 fn read_job_logs(job: &Job) -> String {
     let log_paths = SlurmParser::get_job_log_paths(job);
-    
+
     // Try each potential log path
     for path in &log_paths {
         if let Ok(content) = fs::read_to_string(path) {
             if content.is_empty() {
                 return format!("Log file exists but is empty: {}", path);
             }
-            
+
             // Show last 20 lines (tail-like behavior)
             let lines: Vec<&str> = content.lines().collect();
             let start = lines.len().saturating_sub(20);
             let tail_lines = &lines[start..];
-            
+
             return format!(
                 "Log file: {}\n{}\n{}",
                 path,
@@ -285,15 +289,12 @@ fn read_job_logs(job: &Job) -> String {
             );
         }
     }
-    
+
     // No logs found
     if log_paths.is_empty() {
         "No log file paths available".to_string()
     } else {
-        format!(
-            "No logs found. Checked paths:\n{}",
-            log_paths.join("\n")
-        )
+        format!("No logs found. Checked paths:\n{}", log_paths.join("\n"))
     }
 }
 

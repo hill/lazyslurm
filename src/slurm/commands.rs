@@ -7,11 +7,11 @@ pub struct SlurmCommands;
 impl SlurmCommands {
     pub async fn squeue(user: Option<&str>) -> Result<String> {
         let mut cmd = TokioCommand::new("squeue");
-        
+
         if let Some(user) = user {
             cmd.arg("-u").arg(user);
         }
-        
+
         cmd.arg("--format=%i,%j,%u,%t,%M,%N,%P");
 
         let output = cmd.output().await.context("Failed to execute squeue")?;

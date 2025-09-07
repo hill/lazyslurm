@@ -29,7 +29,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
-        
+
         Self {
             job_list: JobList::new(),
             selected_job_index: 0,
@@ -85,7 +85,8 @@ impl App {
     }
 
     pub fn select_next_job(&mut self) {
-        if !self.job_list.jobs.is_empty() && self.selected_job_index < self.job_list.jobs.len() - 1 {
+        if !self.job_list.jobs.is_empty() && self.selected_job_index < self.job_list.jobs.len() - 1
+        {
             self.selected_job_index += 1;
             self.update_selected_job();
         }

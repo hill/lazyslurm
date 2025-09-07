@@ -1,20 +1,22 @@
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{error::Error, io, time::Duration};
 use tokio::time::sleep;
 
-use lazyslurm::ui::{components::render_app, App};
 use lazyslurm::slurm::SlurmCommands;
+use lazyslurm::ui::{App, components::render_app};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Check if SLURM is available
     if !SlurmCommands::check_slurm_available() {
-        eprintln!("Error: SLURM commands not found. Please make sure SLURM is installed and available in PATH.");
+        eprintln!(
+            "Error: SLURM commands not found. Please make sure SLURM is installed and available in PATH."
+        );
         eprintln!("Required commands: squeue, scontrol, scancel");
         std::process::exit(1);
     }
@@ -59,30 +61,32 @@ async fn run_app(
 
         // Handle events with timeout
         let timeout = Duration::from_millis(250);
-        if crossterm::event::poll(timeout)? && let Event::Key(key) = event::read()? {
-                // Only handle KeyEventKind::Press to avoid duplicate events
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
+        if crossterm::event::poll(timeout)?
+            && let Event::Key(key) = event::read()?
+        {
+            // Only handle KeyEventKind::Press to avoid duplicate events
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
 
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('r') => {
-                        app.refresh_jobs().await?;
-                    }
-                    KeyCode::Up => {
-                        app.select_previous_job();
-                    }
-                    KeyCode::Down => {
-                        app.select_next_job();
-                    }
-                    KeyCode::Char('c') => {
-                        if let Err(e) = app.cancel_selected_job().await {
-                            app.error_message = Some(format!("Failed to cancel job: {}", e));
-                        }
-                    }
-                    _ => {}
+            match key.code {
+                KeyCode::Char('q') => return Ok(()),
+                KeyCode::Char('r') => {
+                    app.refresh_jobs().await?;
                 }
+                KeyCode::Up => {
+                    app.select_previous_job();
+                }
+                KeyCode::Down => {
+                    app.select_next_job();
+                }
+                KeyCode::Char('c') => {
+                    if let Err(e) = app.cancel_selected_job().await {
+                        app.error_message = Some(format!("Failed to cancel job: {}", e));
+                    }
+                }
+                _ => {}
+            }
         }
 
         // Auto refresh if needed
