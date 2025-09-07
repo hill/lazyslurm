@@ -67,7 +67,7 @@ release version="patch":
     fi
 
     # Compute new version and update Cargo.toml via helper script
-    new_ver=$(python3 scripts/bump_version.py "$version")
+    new_ver=$(python3 scripts/bump_version.py "{{version}}")
 
     echo "Bumped version to ${new_ver}"
 
