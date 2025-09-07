@@ -59,8 +59,7 @@ async fn run_app(
 
         // Handle events with timeout
         let timeout = Duration::from_millis(250);
-        if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
+        if crossterm::event::poll(timeout)? && let Event::Key(key) = event::read()? {
                 // Only handle KeyEventKind::Press to avoid duplicate events
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -84,7 +83,6 @@ async fn run_app(
                     }
                     _ => {}
                 }
-            }
         }
 
         // Auto refresh if needed

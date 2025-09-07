@@ -4,18 +4,20 @@
 [![Crates.io](https://img.shields.io/crates/v/lazyslurm.svg)](https://crates.io/crates/lazyslurm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A terminal UI for [SLURM](https://slurm.schedmd.com/overview.html) job management. Like the awesome [lazygit](https://github.com/jesseduffield/lazygit) but for HPC clusters.
+A terminal UI for [slurm](https://slurm.schedmd.com/overview.html) job management. Like the awesome [lazygit](https://github.com/jesseduffield/lazygit) but for HPC clusters.
 
 ![LazySlurm Screenshot](screenshot.png)
 
+## Why This Exists
+
+Slurm's CLI is powerful but clunky for monitoring. This project gives you the lazygit experience.
+Built in Rust with ratatui because single binaries are beautiful on HPC systems.
+
 ## Features
 
-- **Real-time job monitoring** - Watch your jobs as they run, with live log tailing
-- **Intuitive keyboard navigation** - Vim-like controls for efficiency  
 - **Job management** - Cancel jobs, view details, and monitor resource usage
-- **Cross-platform** - Works on Linux, macOS, and Windows
 - **Single binary** - No dependencies, perfect for HPC environments
-- **Lightweight** - Fast startup, minimal resource usage
+- **Real-time job monitoring** - Watch your jobs as they run, with live log tailing
 
 ## Installation
 
@@ -117,9 +119,3 @@ just slurm_populate
 ```
 
 Your source code is mounted into the container so changes are immediately available.
-
-## Why This Exists
-
-SLURM's CLI is powerful but clunky for monitoring. This gives you the lazygit experience: see state, take actions, see new state. Real-time updates, keyboard navigation, visual feedback.
-
-Built in Rust with ratatui because single binaries are beautiful on HPC systems.

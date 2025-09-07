@@ -57,7 +57,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mut status_text = format!("LazySlurm");
+    let mut status_text = "LazySlurm".to_string();
     
     if let Some(user) = &app.current_user {
         status_text.push_str(&format!(" - User: {}", user));

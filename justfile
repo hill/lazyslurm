@@ -38,6 +38,9 @@ slurm_down:
 test:
     cargo test
 
+# Lint with Clippy
+lint:
+    cargo clippy -- -D warnings
 # Clean up everything
 clean:
     cd dev && docker-compose down -v

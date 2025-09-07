@@ -70,10 +70,10 @@ impl App {
 
         // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)
         for job in jobs.iter_mut().take(10) {
-            if let Ok(scontrol_output) = SlurmCommands::scontrol_show_job(&job.job_id).await {
-                if let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output) {
-                    SlurmParser::enhance_job_with_scontrol_data(job, fields);
-                }
+            if let Ok(scontrol_output) = SlurmCommands::scontrol_show_job(&job.job_id).await
+                && let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output)
+            {
+                SlurmParser::enhance_job_with_scontrol_data(job, fields);
             }
         }
 
@@ -134,5 +134,11 @@ impl App {
 
     pub async fn receive_event(&mut self) -> Option<AppEvent> {
         self.event_receiver.recv().await
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }

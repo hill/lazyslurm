@@ -164,3 +164,9 @@ impl JobList {
         self.jobs.iter().filter(|job| job.is_completed()).collect()
     }
 }
+
+impl Default for JobList {
+    fn default() -> Self {
+        Self::new()
+    }
+}

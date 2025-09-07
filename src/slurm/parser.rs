@@ -152,10 +152,8 @@ impl SlurmParser {
         }
         
         // Secondary: Use StdErr if different
-        if let Some(std_err) = &job.std_err {
-            if Some(std_err) != job.std_out.as_ref() {
-                paths.push(std_err.clone());
-            }
+        if let Some(std_err) = &job.std_err && Some(std_err) != job.std_out.as_ref() {
+            paths.push(std_err.clone());
         }
         
         // Fallback: Common SLURM default patterns in working directory
