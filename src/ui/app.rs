@@ -76,9 +76,11 @@ impl App {
 
     async fn fetch_jobs(&self) -> Result<Vec<Job>> {
         // Get basic job list from squeue
-        let squeue_output =
-            SlurmCommands::squeue(self.current_user.as_deref(), self.current_partition.as_deref())
-                .await?;
+        let squeue_output = SlurmCommands::squeue(
+            self.current_user.as_deref(),
+            self.current_partition.as_deref(),
+        )
+        .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
         // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)

@@ -42,10 +42,18 @@ Notes:
 "#
 )]
 struct Cli {
-    #[arg(short = 'u', long = "user", help = "Filter to a specific user (default: $USER)")]
+    #[arg(
+        short = 'u',
+        long = "user",
+        help = "Filter to a specific user (default: $USER)"
+    )]
     user: Option<String>,
 
-    #[arg(short = 'p', long = "partition", help = "Filter to a specific partition (e.g., gpu)")]
+    #[arg(
+        short = 'p',
+        long = "partition",
+        help = "Filter to a specific partition (e.g., gpu)"
+    )]
     partition: Option<String>,
 }
 
