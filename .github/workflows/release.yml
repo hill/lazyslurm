@@ -6,7 +6,18 @@ on:
       - "v*"
 
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: taiki-e/create-gh-release-action@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-linux:
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,6 +37,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-macos:
+    needs: create-release
     runs-on: macos-latest
     permissions:
       contents: write
@@ -44,6 +56,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-windows:
+    needs: create-release
     runs-on: windows-latest
     permissions:
       contents: write
