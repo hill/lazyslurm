@@ -3,23 +3,13 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
-  create-release:
+  release:
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: taiki-e/create-gh-release-action@v1
-      with:
-        changelog: CHANGELOG.md
-        title: $version
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-assets:
-    needs: create-release
-    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v4
     - uses: taiki-e/upload-rust-binary-action@v1
@@ -28,14 +18,5 @@ jobs:
         target: x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
         archive: $bin-$target
         checksum: sha256
-        token: ${{ secrets.GITHUB_TOKEN }}
-
-  publish-crates:
-    needs: create-release
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - run: cargo publish
       env:
-        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
