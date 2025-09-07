@@ -1,6 +1,6 @@
 [package]
 name = "lazyslurm"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "A terminal UI for monitoring and managing SLURM jobs"
 license = "MIT"
