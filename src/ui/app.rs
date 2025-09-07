@@ -18,6 +18,7 @@ pub struct App {
     pub selected_job_index: usize,
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
+    pub current_partition: Option<String>,
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub is_loading: bool,
@@ -35,6 +36,7 @@ impl App {
             selected_job_index: 0,
             selected_job: None,
             current_user: std::env::var("USER").ok(),
+            current_partition: None,
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2), // Refresh every 2 seconds
             is_loading: false,
@@ -42,6 +44,15 @@ impl App {
             event_sender,
             event_receiver,
         }
+    }
+
+    pub fn with_cli(user: Option<String>, partition: Option<String>) -> Self {
+        let mut app = Self::new();
+        if user.is_some() {
+            app.current_user = user;
+        }
+        app.current_partition = partition;
+        app
     }
 
     pub async fn refresh_jobs(&mut self) -> Result<()> {
@@ -65,7 +76,9 @@ impl App {
 
     async fn fetch_jobs(&self) -> Result<Vec<Job>> {
         // Get basic job list from squeue
-        let squeue_output = SlurmCommands::squeue(self.current_user.as_deref()).await?;
+        let squeue_output =
+            SlurmCommands::squeue(self.current_user.as_deref(), self.current_partition.as_deref())
+                .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
         // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)

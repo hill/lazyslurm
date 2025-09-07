@@ -5,11 +5,15 @@ use tokio::process::Command as TokioCommand;
 pub struct SlurmCommands;
 
 impl SlurmCommands {
-    pub async fn squeue(user: Option<&str>) -> Result<String> {
+    pub async fn squeue(user: Option<&str>, partition: Option<&str>) -> Result<String> {
         let mut cmd = TokioCommand::new("squeue");
 
         if let Some(user) = user {
             cmd.arg("-u").arg(user);
+        }
+
+        if let Some(partition) = partition {
+            cmd.arg("-p").arg(partition);
         }
 
         cmd.arg("--format=%i,%j,%u,%t,%M,%N,%P");

@@ -1,3 +1,4 @@
+use clap::Parser;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -10,12 +11,53 @@ use tokio::time::sleep;
 use lazyslurm::slurm::SlurmCommands;
 use lazyslurm::ui::{App, components::render_app};
 
+#[derive(Parser, Debug)]
+#[command(
+    author,
+    version,
+    about = "A terminal UI for monitoring and managing Slurm jobs.",
+    long_about = "A terminal UI for monitoring and managing Slurm jobs. Built with ratatui for a smooth, single-binary experience on HPC systems.",
+    before_help = r#"
+
+░██                                             ░██                                     
+░██                                             ░██                                     
+░██  ░██████   ░█████████ ░██    ░██  ░███████  ░██ ░██    ░██ ░██░████ ░█████████████  
+░██       ░██       ░███  ░██    ░██ ░██        ░██ ░██    ░██ ░███     ░██   ░██   ░██ 
+░██  ░███████     ░███    ░██    ░██  ░███████  ░██ ░██    ░██ ░██      ░██   ░██   ░██ 
+░██ ░██   ░██   ░███      ░██   ░███        ░██ ░██ ░██   ░███ ░██      ░██   ░██   ░██ 
+░██  ░█████░██ ░█████████  ░█████░██  ░███████  ░██  ░█████░██ ░██      ░██   ░██   ░██ 
+                                 ░██                                                    
+                           ░███████                                                     
+                                                                                        
+
+"#,
+    after_help = r#"Keyboard shortcuts:
+  q: quit
+  ↑/↓ or j/k: navigate jobs
+  r: refresh jobs
+  c: cancel selected job
+
+Notes:
+  - SLURM tools required for normal operation: squeue, scontrol, scancel.
+"#
+)]
+struct Cli {
+    #[arg(short = 'u', long = "user", help = "Filter to a specific user (default: $USER)")]
+    user: Option<String>,
+
+    #[arg(short = 'p', long = "partition", help = "Filter to a specific partition (e.g., gpu)")]
+    partition: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Parse CLI first so --version/-V and --help exit early
+    let cli = Cli::parse();
+
     // Check if SLURM is available
     if !SlurmCommands::check_slurm_available() {
         eprintln!(
-            "Error: SLURM commands not found. Please make sure SLURM is installed and available in PATH."
+            "Error: slurm commands not found. Please make sure slurm is installed and available in PATH."
         );
         eprintln!("Required commands: squeue, scontrol, scancel");
         std::process::exit(1);
@@ -29,7 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::new();
+    let mut app = App::with_cli(cli.user, cli.partition);
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal

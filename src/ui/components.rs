@@ -63,6 +63,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         status_text.push_str(&format!(" - User: {}", user));
     }
 
+    if let Some(part) = &app.current_partition {
+        status_text.push_str(&format!(" - Part: {}", part));
+    }
+
     status_text.push_str(&format!(" - Jobs: {}", app.job_list.jobs.len()));
 
     if app.is_loading {
