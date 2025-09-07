@@ -2,10 +2,16 @@
 name = "lazyslurm"
 version = "0.1.0"
 edition = "2024"
-description = "A terminal UI for managing SLURM jobs"
+description = "A terminal UI for monitoring and managing SLURM jobs"
 license = "MIT"
 authors = ["Tom Hill <tom@hill.xyz>"]
 repository = "https://github.com/hill/lazyslurm"
+homepage = "https://github.com/hill/lazyslurm"
+documentation = "https://docs.rs/lazyslurm"
+readme = "README.md"
+keywords = ["slurm", "hpc", "terminal", "tui", "cluster"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["dev/", ".github/", "*.png", "*.jpg"]
 
 [[bin]]
 name = "lazyslurm"

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo test
+    - run: cargo clippy -- -D warnings
+    - run: cargo fmt --check
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: taiki-e/upload-rust-binary-action@v1
+      with:
+        bin: lazyslurm
+        target: x86_64-unknown-linux-gnu,x86_64-unknown-linux-musl,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc
+        archive: $bin-$target
+        checksum: sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

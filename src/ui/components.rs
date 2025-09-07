@@ -139,7 +139,7 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
             Line::from("    Tom Hill 2025 - tom@hill.xyz"),
             Line::from(""),
             Line::from(""),
-            Line::from("No jobs found."),
+            Line::from("No jobs found!"),
             Line::from(""),
             Line::from("Try running: lazyslurm --user <username>"),
             Line::from("or check if SLURM is available."),
