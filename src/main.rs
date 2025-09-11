@@ -16,7 +16,7 @@ use lazyslurm::ui::{App, components::render_app};
     author,
     version,
     about = "A terminal UI for monitoring and managing Slurm jobs.",
-    long_about = "A terminal UI for monitoring and managing Slurm jobs. Built with ratatui for a smooth, single-binary experience on HPC systems.",
+    long_about = "A terminal UI for monitoring and managing Slurm jobs.",
     before_help = r#"
 
 ░██                                             ░██                                     
