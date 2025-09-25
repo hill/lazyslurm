@@ -135,13 +135,25 @@ async fn run_app(
                     app.select_next_job();
                 }
                 (KeyCode::Char('c'), _) => {
-                    if let Err(e) = app.cancel_selected_job().await {
-                        app.error_message = Some(format!("Failed to cancel job: {}", e));
+                    if app.selected_job.is_some() {
+                        app.show_confirm_popup = true;
+                        app.confirm_action = false;
                     }
                 }
+                (KeyCode::Char('y'), _) if app.show_confirm_popup => {
+                    app.confirm_action = true;
+                    app.show_confirm_popup = false;
+                }
+                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) if app.show_confirm_popup => {
+                    app.show_confirm_popup = false;
+                    app.confirm_action = false;
+                }
+
                 _ => {}
             }
         }
+
+        app.handle_confirm_action().await?;
 
         // Auto refresh if needed
         if app.should_refresh() {

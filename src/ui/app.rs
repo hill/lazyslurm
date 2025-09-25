@@ -25,6 +25,8 @@ pub struct App {
     pub error_message: Option<String>,
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
     pub event_receiver: mpsc::UnboundedReceiver<AppEvent>,
+    pub show_confirm_popup: bool,
+    pub confirm_action: bool,
 }
 
 impl App {
@@ -43,6 +45,8 @@ impl App {
             error_message: None,
             event_sender,
             event_receiver,
+            show_confirm_popup: false,
+            confirm_action: false,
         }
     }
 
@@ -132,6 +136,16 @@ impl App {
 
     pub fn completed_jobs(&self) -> Vec<&Job> {
         self.job_list.completed_jobs()
+    }
+
+    pub async fn handle_confirm_action(&mut self) -> Result<()> {
+        if self.confirm_action && self.selected_job.is_some() {
+            if let Err(e) = self.cancel_selected_job().await {
+                self.error_message = Some(format!("Failed to cancel job: {}", e));
+            }
+            self.confirm_action = false;
+        }
+        Ok(())
     }
 
     pub async fn cancel_selected_job(&mut self) -> Result<()> {
