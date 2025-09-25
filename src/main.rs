@@ -1,6 +1,8 @@
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -119,18 +121,20 @@ async fn run_app(
                 continue;
             }
 
-            match key.code {
-                KeyCode::Char('q') => return Ok(()),
-                KeyCode::Char('r') => {
+            match (key.code, key.modifiers) {
+                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    return Ok(());
+                }
+                (KeyCode::Char('r'), _) => {
                     app.refresh_jobs().await?;
                 }
-                KeyCode::Up => {
+                (KeyCode::Up, _) => {
                     app.select_previous_job();
                 }
-                KeyCode::Down => {
+                (KeyCode::Down, _) => {
                     app.select_next_job();
                 }
-                KeyCode::Char('c') => {
+                (KeyCode::Char('c'), _) => {
                     if let Err(e) = app.cancel_selected_job().await {
                         app.error_message = Some(format!("Failed to cancel job: {}", e));
                     }
