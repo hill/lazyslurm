@@ -1,17 +1,14 @@
 use clap::Parser;
 use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    },
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{error::Error, io, time::Duration};
-use tokio::time::sleep;
+use std::{error::Error, io};
 
 use lazyslurm::slurm::SlurmCommands;
-use lazyslurm::ui::{App, components::render_app};
+use lazyslurm::ui::{App, events};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -107,60 +104,7 @@ async fn run_app(
     // Initial refresh
     app.refresh_jobs().await?;
 
-    loop {
-        // Draw UI
-        terminal.draw(|frame| render_app(frame, app))?;
+    events::run_event_loop(app, terminal).await?;
 
-        // Handle events with timeout
-        let timeout = Duration::from_millis(250);
-        if crossterm::event::poll(timeout)?
-            && let Event::Key(key) = event::read()?
-        {
-            // Only handle KeyEventKind::Press to avoid duplicate events
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-
-            match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    return Ok(());
-                }
-                (KeyCode::Char('r'), _) => {
-                    app.refresh_jobs().await?;
-                }
-                (KeyCode::Up, _) => {
-                    app.select_previous_job();
-                }
-                (KeyCode::Down, _) => {
-                    app.select_next_job();
-                }
-                (KeyCode::Char('c'), _) => {
-                    if app.selected_job.is_some() {
-                        app.show_confirm_popup = true;
-                        app.confirm_action = false;
-                    }
-                }
-                (KeyCode::Char('y'), _) if app.show_confirm_popup => {
-                    app.confirm_action = true;
-                    app.show_confirm_popup = false;
-                }
-                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) if app.show_confirm_popup => {
-                    app.show_confirm_popup = false;
-                    app.confirm_action = false;
-                }
-
-                _ => {}
-            }
-        }
-
-        app.handle_confirm_action().await?;
-
-        // Auto refresh if needed
-        if app.should_refresh() {
-            app.refresh_jobs().await?;
-        }
-
-        // Small delay to prevent excessive CPU usage
-        sleep(Duration::from_millis(50)).await;
-    }
+    Ok(())
 }

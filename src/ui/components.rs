@@ -8,9 +8,12 @@ use ratatui::{
 };
 use std::fs;
 
-use crate::models::{Job, JobState};
 use crate::slurm::SlurmParser;
 use crate::ui::App;
+use crate::{
+    AppState,
+    models::{Job, JobState},
+};
 
 pub fn render_app(frame: &mut Frame, app: &App) {
     // Create main layout
@@ -56,12 +59,31 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     // Render help bar
     render_help_bar(frame, chunks[2]);
 
-    if app.show_confirm_popup {
+    if app.state == AppState::UserSearchPopup {
+        let popup_area = centered_rect(30, 7, frame.area());
+        frame.render_widget(Clear, popup_area);
+
+        let popup = Paragraph::new(app.input.as_str())
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Search User:")
+                    .style(Style::default().fg(Color::Yellow)),
+            )
+            .wrap(Wrap { trim: true })
+            .alignment(Alignment::Center);
+
+        frame.render_widget(popup, popup_area);
+    }
+
+    if app.state == AppState::CancelJobPopup {
         let popup_area = centered_rect(30, 7, frame.area());
 
         frame.render_widget(Clear, popup_area);
+        let selected_job_id = app.selected_job.clone().unwrap().job_id;
 
-        let popup = Paragraph::new("Cancel selected job? (y/n)")
+        let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
             .style(Style::default().fg(Color::White))
             .block(
                 Block::default()
