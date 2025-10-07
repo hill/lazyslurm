@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 use std::fs;
 
@@ -54,6 +55,25 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
     // Render help bar
     render_help_bar(frame, chunks[2]);
+
+    if app.show_confirm_popup {
+        let popup_area = centered_rect(30, 7, frame.area());
+
+        frame.render_widget(Clear, popup_area);
+
+        let popup = Paragraph::new("Cancel selected job? (y/n)")
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Confirm")
+                    .style(Style::default().fg(Color::Yellow)),
+            )
+            .wrap(Wrap { trim: true })
+            .alignment(Alignment::Center);
+
+        frame.render_widget(popup, popup_area);
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -308,4 +328,24 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

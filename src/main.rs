@@ -1,6 +1,8 @@
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -119,25 +121,39 @@ async fn run_app(
                 continue;
             }
 
-            match key.code {
-                KeyCode::Char('q') => return Ok(()),
-                KeyCode::Char('r') => {
+            match (key.code, key.modifiers) {
+                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    return Ok(());
+                }
+                (KeyCode::Char('r'), _) => {
                     app.refresh_jobs().await?;
                 }
-                KeyCode::Up => {
+                (KeyCode::Up, _) => {
                     app.select_previous_job();
                 }
-                KeyCode::Down => {
+                (KeyCode::Down, _) => {
                     app.select_next_job();
                 }
-                KeyCode::Char('c') => {
-                    if let Err(e) = app.cancel_selected_job().await {
-                        app.error_message = Some(format!("Failed to cancel job: {}", e));
+                (KeyCode::Char('c'), _) => {
+                    if app.selected_job.is_some() {
+                        app.show_confirm_popup = true;
+                        app.confirm_action = false;
                     }
                 }
+                (KeyCode::Char('y'), _) if app.show_confirm_popup => {
+                    app.confirm_action = true;
+                    app.show_confirm_popup = false;
+                }
+                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) if app.show_confirm_popup => {
+                    app.show_confirm_popup = false;
+                    app.confirm_action = false;
+                }
+
                 _ => {}
             }
         }
+
+        app.handle_confirm_action().await?;
 
         // Auto refresh if needed
         if app.should_refresh() {
