@@ -15,6 +15,7 @@ pub enum AppEvent {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AppState {
     Normal,
+    PartitionSearchPopup,
     UserSearchPopup,
     CancelJobPopup,
 }

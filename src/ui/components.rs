@@ -15,6 +15,24 @@ use crate::{
     models::{Job, JobState},
 };
 
+fn render_text_popup(popup_text: String, app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(30, 7, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let popup = Paragraph::new(app.input.as_str())
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(popup_text)
+                .style(Style::default().fg(Color::Yellow)),
+        )
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Center);
+
+    frame.render_widget(popup, popup_area);
+}
+
 pub fn render_app(frame: &mut Frame, app: &App) {
     // Create main layout
     let chunks = Layout::default()
@@ -59,42 +77,31 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     // Render help bar
     render_help_bar(frame, chunks[2]);
 
-    if app.state == AppState::UserSearchPopup {
-        let popup_area = centered_rect(30, 7, frame.area());
-        frame.render_widget(Clear, popup_area);
+    match app.state {
+        AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
+        AppState::PartitionSearchPopup => {
+            render_text_popup("Search Partition:".to_string(), app, frame)
+        }
+        AppState::CancelJobPopup => {
+            let popup_area = centered_rect(30, 7, frame.area());
 
-        let popup = Paragraph::new(app.input.as_str())
-            .style(Style::default().fg(Color::White))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Search User:")
-                    .style(Style::default().fg(Color::Yellow)),
-            )
-            .wrap(Wrap { trim: true })
-            .alignment(Alignment::Center);
+            frame.render_widget(Clear, popup_area);
+            let selected_job_id = app.selected_job.clone().unwrap().job_id;
 
-        frame.render_widget(popup, popup_area);
-    }
+            let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
+                .style(Style::default().fg(Color::White))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Confirm")
+                        .style(Style::default().fg(Color::Yellow)),
+                )
+                .wrap(Wrap { trim: true })
+                .alignment(Alignment::Center);
 
-    if app.state == AppState::CancelJobPopup {
-        let popup_area = centered_rect(30, 7, frame.area());
-
-        frame.render_widget(Clear, popup_area);
-        let selected_job_id = app.selected_job.clone().unwrap().job_id;
-
-        let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
-            .style(Style::default().fg(Color::White))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Confirm")
-                    .style(Style::default().fg(Color::Yellow)),
-            )
-            .wrap(Wrap { trim: true })
-            .alignment(Alignment::Center);
-
-        frame.render_widget(popup, popup_area);
+            frame.render_widget(popup, popup_area);
+        }
+        _ => {}
     }
 }
 
