@@ -75,16 +75,20 @@ lazyslurm --partition gpu
 ```
 
 ### Keyboard Controls
-
-| Key | Action |
-|-----|--------|
-| `q` | Quit application |
-| `↑/↓` or `j/k` | Navigate job list |
-| `r` | Refresh job data |
-| `c` | Cancel selected job |
-| `Enter` | View job details |
-| `l` | View job logs |
-| `?` | Show help |
+| Key       | Context        | Action                     |
+|-----------|----------------|----------------------------|
+| `q` or `Ctrl+C` | Normal | Exit application    |
+| `r` | Normal | Refresh jobs    |
+| `↑/↓` | Normal | Navigate job list |
+| `u` | Normal | Open user search popup |
+| `p` | Normal | Open partition search popup |
+| `c` | Normal | Open cancel job popup (if job selected) |
+| `Enter` | SearchPopup| Confirm user input |
+| `Esc` | SearchPopup| Cancel user input |
+| `Char(c)` | SearchPopup| Append to input |
+| `Backspace` | SearchPopup| Delete last input char |
+| `y` | CancelJobPopup | Confirm job cancel |
+| `n` or `Esc` | CancelJobPopup   | Cancel job cancel |
 
 ### Configuration
 

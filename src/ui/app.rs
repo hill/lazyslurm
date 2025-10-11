@@ -12,9 +12,18 @@ pub enum AppEvent {
     Quit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AppState {
+    Normal,
+    PartitionSearchPopup,
+    UserSearchPopup,
+    CancelJobPopup,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub job_list: JobList,
+    pub state: AppState,
     pub selected_job_index: usize,
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
@@ -25,8 +34,8 @@ pub struct App {
     pub error_message: Option<String>,
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
     pub event_receiver: mpsc::UnboundedReceiver<AppEvent>,
-    pub show_confirm_popup: bool,
     pub confirm_action: bool,
+    pub input: String,
 }
 
 impl App {
@@ -35,6 +44,7 @@ impl App {
 
         Self {
             job_list: JobList::new(),
+            state: AppState::Normal,
             selected_job_index: 0,
             selected_job: None,
             current_user: std::env::var("USER").ok(),
@@ -45,8 +55,8 @@ impl App {
             error_message: None,
             event_sender,
             event_receiver,
-            show_confirm_popup: false,
             confirm_action: false,
+            input: "".to_string(),
         }
     }
 
@@ -138,7 +148,7 @@ impl App {
         self.job_list.completed_jobs()
     }
 
-    pub async fn handle_confirm_action(&mut self) -> Result<()> {
+    pub async fn handle_cancel_popup(&mut self) -> Result<()> {
         if self.confirm_action && self.selected_job.is_some() {
             if let Err(e) = self.cancel_selected_job().await {
                 self.error_message = Some(format!("Failed to cancel job: {}", e));
