@@ -5,6 +5,10 @@
 default:
     @just --list --unsorted
 
+# Run lazyslurm
+dev:
+    cargo run
+
 # Build and start SLURM development environment
 slurm_up:
     cd dev && docker-compose build
