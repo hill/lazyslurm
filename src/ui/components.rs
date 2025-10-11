@@ -75,7 +75,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     render_quick_info(frame, app, right_chunks[2]);
 
     // Render help bar
-    render_help_bar(frame, chunks[2]);
+    render_help_bar(app.state, frame, chunks[2]);
 
     match app.state {
         AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
@@ -243,9 +243,15 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(quick_info, area);
 }
 
-fn render_help_bar(frame: &mut Frame, area: Rect) {
-    let help_text =
-        "q: quit | ↑↓: navigate | r: refresh | c: cancel job | Enter: job details | ?:help";
+fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
+    let help_text = match app_state {
+        AppState::Normal => {
+            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user"
+        }
+        AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
+        AppState::PartitionSearchPopup => "esc: close | Enter: submit",
+        AppState::UserSearchPopup => "esc: close | Enter: submit",
+    };
     let help = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL))
         .style(Style::default().fg(Color::Gray));
