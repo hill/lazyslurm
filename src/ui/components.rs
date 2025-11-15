@@ -8,9 +8,30 @@ use ratatui::{
 };
 use std::fs;
 
-use crate::models::{Job, JobState};
 use crate::slurm::SlurmParser;
 use crate::ui::App;
+use crate::{
+    AppState,
+    models::{Job, JobState},
+};
+
+fn render_text_popup(popup_text: String, app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(30, 9, frame.area());
+    frame.render_widget(Clear, popup_area);
+
+    let popup = Paragraph::new(app.input.as_str())
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(popup_text)
+                .style(Style::default().fg(Color::Yellow)),
+        )
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Center);
+
+    frame.render_widget(popup, popup_area);
+}
 
 pub fn render_app(frame: &mut Frame, app: &App) {
     // Create main layout
@@ -54,25 +75,33 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     render_quick_info(frame, app, right_chunks[2]);
 
     // Render help bar
-    render_help_bar(frame, chunks[2]);
+    render_help_bar(app.state, frame, chunks[2]);
 
-    if app.show_confirm_popup {
-        let popup_area = centered_rect(30, 7, frame.area());
+    match app.state {
+        AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
+        AppState::PartitionSearchPopup => {
+            render_text_popup("Search Partition:".to_string(), app, frame)
+        }
+        AppState::CancelJobPopup => {
+            let popup_area = centered_rect(30, 7, frame.area());
 
-        frame.render_widget(Clear, popup_area);
+            frame.render_widget(Clear, popup_area);
+            let selected_job_id = app.selected_job.clone().unwrap().job_id;
 
-        let popup = Paragraph::new("Cancel selected job? (y/n)")
-            .style(Style::default().fg(Color::White))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Confirm")
-                    .style(Style::default().fg(Color::Yellow)),
-            )
-            .wrap(Wrap { trim: true })
-            .alignment(Alignment::Center);
+            let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
+                .style(Style::default().fg(Color::White))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Confirm")
+                        .style(Style::default().fg(Color::Yellow)),
+                )
+                .wrap(Wrap { trim: true })
+                .alignment(Alignment::Center);
 
-        frame.render_widget(popup, popup_area);
+            frame.render_widget(popup, popup_area);
+        }
+        _ => {}
     }
 }
 
@@ -214,9 +243,15 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(quick_info, area);
 }
 
-fn render_help_bar(frame: &mut Frame, area: Rect) {
-    let help_text =
-        "q: quit | ↑↓: navigate | r: refresh | c: cancel job | Enter: job details | ?:help";
+fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
+    let help_text = match app_state {
+        AppState::Normal => {
+            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user"
+        }
+        AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
+        AppState::PartitionSearchPopup => "esc: close | Enter: submit",
+        AppState::UserSearchPopup => "esc: close | Enter: submit",
+    };
     let help = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL))
         .style(Style::default().fg(Color::Gray));
