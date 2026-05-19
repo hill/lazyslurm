@@ -15,12 +15,12 @@ use crate::slurm::executor::SlurmExecutor;
 /// ```
 ///
 /// `scancel` calls are recorded in [`Self::cancelled`] for test assertions.
-pub struct FixtureSlurm {
+pub struct SlurmFixture {
     pub fixture_dir: PathBuf,
     pub cancelled: Mutex<Vec<String>>,
 }
 
-impl FixtureSlurm {
+impl SlurmFixture {
     pub fn new(fixture_dir: impl Into<PathBuf>) -> Self {
         Self {
             fixture_dir: fixture_dir.into(),
@@ -30,7 +30,7 @@ impl FixtureSlurm {
 }
 
 #[async_trait]
-impl SlurmExecutor for FixtureSlurm {
+impl SlurmExecutor for SlurmFixture {
     async fn squeue(&self, _user: Option<&str>, _partition: Option<&str>) -> Result<String> {
         let path = self.fixture_dir.join("squeue.txt");
         std::fs::read_to_string(&path)

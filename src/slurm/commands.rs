@@ -5,10 +5,10 @@ use tokio::process::Command as TokioCommand;
 
 use crate::slurm::executor::SlurmExecutor;
 
-pub struct RealSlurm;
+pub struct SlurmProcess;
 
 #[async_trait]
-impl SlurmExecutor for RealSlurm {
+impl SlurmExecutor for SlurmProcess {
     async fn squeue(&self, user: Option<&str>, partition: Option<&str>) -> Result<String> {
         let mut cmd = TokioCommand::new("squeue");
 

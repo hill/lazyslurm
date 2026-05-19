@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::models::{Job, JobList};
-use crate::slurm::{RealSlurm, SlurmExecutor, SlurmParser};
+use crate::slurm::{SlurmProcess, SlurmExecutor, SlurmParser};
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -41,7 +41,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self::with_executor(Arc::new(RealSlurm))
+        Self::with_executor(Arc::new(SlurmProcess))
     }
 
     pub fn with_executor(executor: Arc<dyn SlurmExecutor>) -> Self {

@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use lazyslurm::slurm::{FixtureSlurm, SlurmExecutor, SlurmParser};
+use lazyslurm::slurm::{SlurmFixture, SlurmExecutor, SlurmParser};
 
 fn fixture_dir(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -16,7 +16,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 
 #[tokio::test]
 async fn parse_squeue_basic() {
-    let exec = FixtureSlurm::new(fixture_dir("basic"));
+    let exec = SlurmFixture::new(fixture_dir("basic"));
     let raw = exec.squeue(None, None).await.unwrap();
     let jobs = SlurmParser::parse_squeue_output(&raw).unwrap();
     insta::assert_yaml_snapshot!(jobs);
@@ -24,7 +24,7 @@ async fn parse_squeue_basic() {
 
 #[tokio::test]
 async fn parse_squeue_empty() {
-    let exec = FixtureSlurm::new(fixture_dir("empty"));
+    let exec = SlurmFixture::new(fixture_dir("empty"));
     let raw = exec.squeue(None, None).await.unwrap();
     let jobs = SlurmParser::parse_squeue_output(&raw).unwrap();
     insta::assert_yaml_snapshot!(jobs);
@@ -32,7 +32,7 @@ async fn parse_squeue_empty() {
 
 #[tokio::test]
 async fn parse_squeue_array_jobs() {
-    let exec = FixtureSlurm::new(fixture_dir("array_jobs"));
+    let exec = SlurmFixture::new(fixture_dir("array_jobs"));
     let raw = exec.squeue(None, None).await.unwrap();
     let jobs = SlurmParser::parse_squeue_output(&raw).unwrap();
     insta::assert_yaml_snapshot!(jobs);
@@ -40,7 +40,7 @@ async fn parse_squeue_array_jobs() {
 
 #[tokio::test]
 async fn parse_scontrol_running_job() {
-    let exec = FixtureSlurm::new(fixture_dir("basic"));
+    let exec = SlurmFixture::new(fixture_dir("basic"));
     let raw = exec.scontrol_show_job("12345").await.unwrap();
     let mut fields: Vec<(String, String)> = SlurmParser::parse_scontrol_output(&raw)
         .unwrap()
@@ -53,7 +53,7 @@ async fn parse_scontrol_running_job() {
 
 #[tokio::test]
 async fn parse_scontrol_pending_job() {
-    let exec = FixtureSlurm::new(fixture_dir("basic"));
+    let exec = SlurmFixture::new(fixture_dir("basic"));
     let raw = exec.scontrol_show_job("12346").await.unwrap();
     let mut fields: Vec<(String, String)> = SlurmParser::parse_scontrol_output(&raw)
         .unwrap()
@@ -65,7 +65,7 @@ async fn parse_scontrol_pending_job() {
 
 #[tokio::test]
 async fn enhance_job_with_scontrol() {
-    let exec = FixtureSlurm::new(fixture_dir("basic"));
+    let exec = SlurmFixture::new(fixture_dir("basic"));
     let raw_squeue = exec.squeue(None, None).await.unwrap();
     let mut jobs = SlurmParser::parse_squeue_output(&raw_squeue).unwrap();
 
@@ -82,7 +82,7 @@ async fn enhance_job_with_scontrol() {
 
 #[tokio::test]
 async fn fixture_scancel_records_calls() {
-    let exec = FixtureSlurm::new(fixture_dir("basic"));
+    let exec = SlurmFixture::new(fixture_dir("basic"));
     exec.scancel("12345").await.unwrap();
     exec.scancel("12347").await.unwrap();
     let cancelled = exec.cancelled.lock().unwrap().clone();
