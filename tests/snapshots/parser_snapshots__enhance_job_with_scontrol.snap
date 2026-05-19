@@ -1,5 +1,6 @@
 ---
 source: tests/parser_snapshots.rs
+assertion_line: 80
 expression: jobs
 ---
 - job_id: "12345"
@@ -9,20 +10,20 @@ expression: jobs
   user: alice
   partition: debug
   state: Running
-  time_limit: ~
+  time_limit: "01:00:00"
   time_used: "0:30"
-  submit_time: ~
-  start_time: ~
+  submit_time: "2024-01-15T10:19:13Z"
+  start_time: "2024-01-15T10:19:13Z"
   end_time: ~
-  nodes: ~
+  nodes: 1
   node_list: node01
-  cpus: ~
-  memory: ~
+  cpus: 4
+  memory: 8G
   working_dir: /home/alice
   std_out: /home/alice/slurm-12345.out
   std_err: /home/alice/slurm-12345.err
   exit_code: 0
-  reason: ~
+  reason: None
 - job_id: "12346"
   array_job_id: ~
   array_task_id: ~
@@ -30,20 +31,20 @@ expression: jobs
   user: bob
   partition: debug
   state: Pending
-  time_limit: ~
+  time_limit: "02:00:00"
   time_used: "0:00"
-  submit_time: ~
+  submit_time: "2024-01-15T10:20:00Z"
   start_time: ~
   end_time: ~
-  nodes: ~
+  nodes: 2
   node_list: (null)
-  cpus: ~
-  memory: ~
+  cpus: 8
+  memory: 16G
   working_dir: /home/bob
   std_out: /home/bob/slurm-12346.out
   std_err: /home/bob/slurm-12346.err
   exit_code: 0
-  reason: ~
+  reason: Resources
 - job_id: "12347"
   array_job_id: ~
   array_task_id: ~
@@ -51,17 +52,17 @@ expression: jobs
   user: alice
   partition: gpu
   state: Running
-  time_limit: ~
+  time_limit: "01:00:00"
   time_used: "5:23"
-  submit_time: ~
-  start_time: ~
+  submit_time: "2024-01-15T10:15:00Z"
+  start_time: "2024-01-15T10:15:00Z"
   end_time: ~
-  nodes: ~
+  nodes: 1
   node_list: node02
-  cpus: ~
-  memory: ~
+  cpus: 2
+  memory: 4G
   working_dir: /home/alice
   std_out: /home/alice/slurm-12347.out
   std_err: /home/alice/slurm-12347.err
   exit_code: 0
-  reason: ~
+  reason: None
