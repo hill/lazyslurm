@@ -1,0 +1,17 @@
+JobId=12347 JobName=quick_task
+   UserId=alice(1000) GroupId=alice(1000) MCS_label=N/A
+   Priority=4294901757 Nice=0 Account=(null) QOS=normal
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:05:23 TimeLimit=01:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T10:15:00 EligibleTime=2024-01-15T10:15:00
+   AccrueTime=2024-01-15T10:15:00
+   StartTime=2024-01-15T10:15:00 EndTime=Unknown Deadline=N/A
+   Partition=gpu
+   NodeList=node02
+   BatchHost=node02
+   NumNodes=1 NumCPUs=2 NumTasks=1 CPUs/Task=2
+   MinCPUsNode=2 MinMemoryNode=4G MinTmpDiskNode=0
+   WorkDir=/home/alice
+   StdErr=/home/alice/slurm-12347.err
+   StdOut=/home/alice/slurm-12347.out

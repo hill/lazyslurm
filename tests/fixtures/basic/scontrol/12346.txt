@@ -1,0 +1,15 @@
+JobId=12346 JobName=another_job
+   UserId=bob(1001) GroupId=bob(1001) MCS_label=N/A
+   Priority=4294901758 Nice=0 Account=(null) QOS=normal
+   JobState=PENDING Reason=Resources Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:00 TimeLimit=02:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T10:20:00 EligibleTime=2024-01-15T10:20:00
+   AccrueTime=2024-01-15T10:20:00
+   StartTime=Unknown EndTime=Unknown Deadline=N/A
+   Partition=debug
+   NumNodes=2 NumCPUs=8 NumTasks=2 CPUs/Task=4
+   MinCPUsNode=4 MinMemoryNode=16G MinTmpDiskNode=0
+   WorkDir=/home/bob
+   StdErr=/home/bob/slurm-12346.err
+   StdOut=/home/bob/slurm-12346.out

@@ -1,0 +1,6 @@
+JOBID,NAME,USER,ST,TIME,NODELIST,PARTITION
+23673084_1,array_task,carol,R,1:15,node03,gpu
+23673084_2,array_task,carol,R,1:14,node04,gpu
+23673084_3,array_task,carol,PD,0:00,(null),gpu
+23673084_4,array_task,carol,PD,0:00,(null),gpu
+99999,solo_job,dave,R,0:42,node05,compute

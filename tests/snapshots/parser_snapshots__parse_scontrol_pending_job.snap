@@ -1,0 +1,52 @@
+---
+source: tests/parser_snapshots.rs
+expression: fields
+---
+- - Account
+  - (null) QOS
+- - AccrueTime
+  - "2024-01-15T10:20:00"
+- - BatchFlag
+  - 1 Reboot
+- - Deadline
+  - N/A
+- - Dependency
+  - (null)
+- - ExitCode
+  - "0:0"
+- - JobId
+  - 12346 JobName
+- - JobState
+  - PENDING Reason
+- - MCS_label
+  - N/A
+- - MinCPUsNode
+  - 4 MinMemoryNode
+- - MinTmpDiskNode
+  - "0"
+- - NumNodes
+  - 2 NumCPUs
+- - NumTasks
+  - 2 CPUs/Task
+- - Partition
+  - debug
+- - Priority
+  - 4294901758 Nice
+- - Requeue
+  - 1 Restarts
+- - RunTime
+  - "00:00:00 TimeLimit"
+- - StartTime
+  - Unknown EndTime
+- - StdErr
+  - /home/bob/slurm-12346.err
+- - StdOut
+  - /home/bob/slurm-12346.out
+- - SubmitTime
+  - "2024-01-15T10:20:00 EligibleTime"
+- - TimeMin
+  - N/A
+- - UserId
+  - bob(1001) GroupId
+- - WorkDir
+  - /home/bob

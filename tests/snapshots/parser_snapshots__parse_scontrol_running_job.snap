@@ -1,0 +1,82 @@
+---
+source: tests/parser_snapshots.rs
+expression: fields
+---
+- - Account
+  - (null) QOS
+- - AccrueTime
+  - "2024-01-15T10:19:13"
+- - BatchFlag
+  - 1 Reboot
+- - BatchHost
+  - node01
+- - Command
+  - /home/alice/script.sh
+- - CoreSpec
+  - "*"
+- - Deadline
+  - N/A
+- - Dependency
+  - (null)
+- - ExitCode
+  - "0:0"
+- - Features
+  - (null) DelayBoot
+- - JobId
+  - 12345 JobName
+- - JobState
+  - RUNNING Reason
+- - LastSchedEval
+  - "2024-01-15T10:19:13"
+- - Licenses
+  - (null) Network
+- - MCS_label
+  - N/A
+- - MinCPUsNode
+  - 4 MinMemoryNode
+- - MinTmpDiskNode
+  - "0"
+- - Node
+  - "* NtasksPerN:B:S:C"
+- - NodeList
+  - node01
+- - NumNodes
+  - 1 NumCPUs
+- - NumTasks
+  - 1 CPUs/Task
+- - OverSubscribe
+  - OK Contiguous
+- - Partition
+  - "debug AllocNode:Sid"
+- - Priority
+  - 4294901759 Nice
+- - ReqNodeList
+  - (null) ExcNodeList
+- - Requeue
+  - 1 Restarts
+- - Reservation
+  - (null)
+- - RunTime
+  - "00:00:30 TimeLimit"
+- - StartTime
+  - "2024-01-15T10:19:13 EndTime"
+- - StdErr
+  - /home/alice/slurm-12345.err
+- - StdIn
+  - /dev/null
+- - StdOut
+  - /home/alice/slurm-12345.out
+- - SubmitTime
+  - "2024-01-15T10:19:13 EligibleTime"
+- - SuspendTime
+  - None SecsPreSuspend
+- - T
+  - "0:0:*:*"
+- - TRES
+  - "cpu=4,node=1"
+- - TimeMin
+  - N/A
+- - UserId
+  - alice(1000) GroupId
+- - WorkDir
+  - /home/alice

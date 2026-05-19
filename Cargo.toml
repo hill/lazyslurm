@@ -41,6 +41,13 @@ anyhow = "1.0"
 # Regex for parsing
 regex = "1.10"
 
+# Async trait objects
+async-trait = "0.1"
+
+[dev-dependencies]
+# Snapshot testing
+insta = { version = "1.40", features = ["yaml"] }
+
 [profile.dev]
 opt-level = 0
 debug = true

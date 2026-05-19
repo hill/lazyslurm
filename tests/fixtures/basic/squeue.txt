@@ -1,0 +1,4 @@
+JOBID,NAME,USER,ST,TIME,NODELIST,PARTITION
+12345,test_job,alice,R,0:30,node01,debug
+12346,another_job,bob,PD,0:00,(null),debug
+12347,quick_task,alice,R,5:23,node02,gpu
