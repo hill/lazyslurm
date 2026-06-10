@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::models::{Job, JobList};
-use crate::slurm::{SlurmProcess, SlurmExecutor, SlurmParser};
+use crate::slurm::{SlurmExecutor, SlurmParser, SlurmProcess};
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {

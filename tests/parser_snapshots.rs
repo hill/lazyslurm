@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use lazyslurm::slurm::{SlurmFixture, SlurmExecutor, SlurmParser};
+use lazyslurm::slurm::{SlurmExecutor, SlurmFixture, SlurmParser};
 
 fn fixture_dir(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
