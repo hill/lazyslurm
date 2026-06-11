@@ -7,7 +7,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{error::Error, io};
 
-use lazyslurm::slurm::SlurmCommands;
+use lazyslurm::slurm::check_slurm_available;
 use lazyslurm::ui::{App, events};
 
 #[derive(Parser, Debug)]
@@ -54,6 +54,12 @@ struct Cli {
         help = "Filter to a specific partition (e.g., gpu)"
     )]
     partition: Option<String>,
+
+    #[arg(
+        long = "json",
+        help = "Fetch jobs once, print as JSON to stdout, and exit (headless mode)"
+    )]
+    json: bool,
 }
 
 #[tokio::main]
@@ -62,12 +68,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     // Check if SLURM is available
-    if !SlurmCommands::check_slurm_available() {
+    if !check_slurm_available() {
         eprintln!(
             "Error: slurm commands not found. Please make sure slurm is installed and available in PATH."
         );
         eprintln!("Required commands: squeue, scontrol, scancel");
         std::process::exit(1);
+    }
+
+    if cli.json {
+        return run_headless(cli.user, cli.partition).await;
     }
 
     // Setup terminal
@@ -94,6 +104,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Application error: {err:?}");
     }
 
+    Ok(())
+}
+
+async fn run_headless(
+    user: Option<String>,
+    partition: Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    let mut app = App::with_cli(user, partition);
+    app.refresh_jobs().await?;
+
+    if let Some(err) = &app.error_message {
+        eprintln!("Error: {err}");
+        std::process::exit(1);
+    }
+
+    let json = serde_json::to_string_pretty(&app.job_list)?;
+    println!("{json}");
     Ok(())
 }
 

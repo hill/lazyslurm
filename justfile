@@ -9,10 +9,14 @@ default:
 dev:
     cargo run
 
+# Run lazyslurm inside the SLURM container (for local dev without SLURM)
+dev-docker:
+    docker exec -it lazyslurm_dev bash -c "cd /workspace && cargo run"
+
 # Build and start SLURM development environment
 slurm_up:
-    cd dev && docker-compose build
-    cd dev && docker-compose up -d
+    cd dev && docker compose build
+    cd dev && docker compose up -d
     @echo "SLURM container started!"
     @echo "Get shell: just slurm_shell"
 
@@ -36,7 +40,7 @@ slurm_status:
 
 # Stop SLURM environment
 slurm_down:
-    cd dev && docker-compose down
+    cd dev && docker compose down
 
 # Build and run tests
 test:
@@ -47,7 +51,7 @@ lint:
     cargo clippy -- -D warnings
 # Clean up everything
 clean:
-    cd dev && docker-compose down -v
+    cd dev && docker compose down -v
     docker system prune -f
     cargo clean
 

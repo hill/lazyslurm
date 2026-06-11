@@ -1,0 +1,27 @@
+JobId=12345 JobName=test_job
+   UserId=alice(1000) GroupId=alice(1000) MCS_label=N/A
+   Priority=4294901759 Nice=0 Account=(null) QOS=normal
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:30 TimeLimit=01:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T10:19:13 EligibleTime=2024-01-15T10:19:13
+   AccrueTime=2024-01-15T10:19:13
+   StartTime=2024-01-15T10:19:13 EndTime=Unknown Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2024-01-15T10:19:13
+   Partition=debug AllocNode:Sid=slurmctld:1
+   ReqNodeList=(null) ExcNodeList=(null)
+   NodeList=node01
+   BatchHost=node01
+   NumNodes=1 NumCPUs=4 NumTasks=1 CPUs/Task=4 ReqB:S:C:T=0:0:*:*
+   TRES=cpu=4,node=1
+   Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=*
+   MinCPUsNode=4 MinMemoryNode=8G MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   Reservation=(null)
+   OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null)
+   Command=/home/alice/script.sh
+   WorkDir=/home/alice
+   StdErr=/home/alice/slurm-12345.err
+   StdIn=/dev/null
+   StdOut=/home/alice/slurm-12345.out
+   Power=

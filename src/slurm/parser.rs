@@ -55,9 +55,8 @@ impl SlurmParser {
     pub fn parse_scontrol_output(output: &str) -> Result<HashMap<String, String>> {
         let mut fields = HashMap::new();
 
-        // scontrol output format: "Key=Value Key2=Value2 ..."
-        // Values can be quoted and contain spaces
-        let re = Regex::new(r"(\w+)=([^\s]+(?:\s+[^\s=]+)*)")?;
+        // scontrol output format: "Key=Value Key2=Value2 ..." separated by whitespace.
+        let re = Regex::new(r"(\w+)=(\S+)")?;
 
         for line in output.lines() {
             for cap in re.captures_iter(line) {

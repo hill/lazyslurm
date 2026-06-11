@@ -1,0 +1,5 @@
+---
+source: tests/parser_snapshots.rs
+expression: jobs
+---
+[]

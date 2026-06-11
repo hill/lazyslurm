@@ -1,9 +1,10 @@
 use anyhow::Result;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::models::{Job, JobList};
-use crate::slurm::{SlurmCommands, SlurmParser};
+use crate::slurm::{SlurmExecutor, SlurmParser, SlurmProcess};
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -20,7 +21,6 @@ pub enum AppState {
     CancelJobPopup,
 }
 
-#[derive(Debug)]
 pub struct App {
     pub job_list: JobList,
     pub state: AppState,
@@ -36,10 +36,15 @@ pub struct App {
     pub event_receiver: mpsc::UnboundedReceiver<AppEvent>,
     pub confirm_action: bool,
     pub input: String,
+    pub executor: Arc<dyn SlurmExecutor>,
 }
 
 impl App {
     pub fn new() -> Self {
+        Self::with_executor(Arc::new(SlurmProcess))
+    }
+
+    pub fn with_executor(executor: Arc<dyn SlurmExecutor>) -> Self {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
         Self {
@@ -50,13 +55,14 @@ impl App {
             current_user: std::env::var("USER").ok(),
             current_partition: None,
             last_refresh: Instant::now(),
-            refresh_interval: Duration::from_secs(2), // Refresh every 2 seconds
+            refresh_interval: Duration::from_secs(2),
             is_loading: false,
             error_message: None,
             event_sender,
             event_receiver,
             confirm_action: false,
             input: "".to_string(),
+            executor,
         }
     }
 
@@ -89,17 +95,18 @@ impl App {
     }
 
     async fn fetch_jobs(&self) -> Result<Vec<Job>> {
-        // Get basic job list from squeue
-        let squeue_output = SlurmCommands::squeue(
-            self.current_user.as_deref(),
-            self.current_partition.as_deref(),
-        )
-        .await?;
+        let squeue_output = self
+            .executor
+            .squeue(
+                self.current_user.as_deref(),
+                self.current_partition.as_deref(),
+            )
+            .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
         // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)
         for job in jobs.iter_mut().take(10) {
-            if let Ok(scontrol_output) = SlurmCommands::scontrol_show_job(&job.job_id).await
+            if let Ok(scontrol_output) = self.executor.scontrol_show_job(&job.job_id).await
                 && let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output)
             {
                 SlurmParser::enhance_job_with_scontrol_data(job, fields);
@@ -160,8 +167,7 @@ impl App {
 
     pub async fn cancel_selected_job(&mut self) -> Result<()> {
         if let Some(job) = &self.selected_job {
-            SlurmCommands::scancel(&job.job_id).await?;
-            // Refresh immediately to show the change
+            self.executor.scancel(&job.job_id).await?;
             self.refresh_jobs().await?;
         }
         Ok(())
