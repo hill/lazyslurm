@@ -6,11 +6,12 @@ use tokio::sync::mpsc;
 use crate::models::{Job, JobList};
 use crate::slurm::{SlurmExecutor, SlurmParser, SlurmProcess};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AppEvent {
-    Refresh,
-    JobSelected(String),
-    Quit,
+    JobsFetched {
+        generation: u64,
+        result: Result<Vec<Job>, String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +41,9 @@ pub struct App {
     pub cancel_target: Option<Job>,
     pub input: String,
     pub executor: Arc<dyn SlurmExecutor>,
+    /// Bumped whenever the user/partition filter changes, so results from
+    /// fetches started under the old filter are dropped on arrival.
+    refresh_generation: u64,
 }
 
 impl App {
@@ -66,6 +70,7 @@ impl App {
             cancel_target: None,
             input: "".to_string(),
             executor,
+            refresh_generation: 0,
         }
     }
 
@@ -78,39 +83,93 @@ impl App {
         app
     }
 
+    /// Fetch jobs and wait for the result. Used by headless mode, the
+    /// initial load, and tests; the TUI loop uses [`Self::start_refresh`].
     pub async fn refresh_jobs(&mut self) -> Result<()> {
         self.is_loading = true;
-        self.error_message = None;
+        let result = Self::fetch_jobs(
+            self.executor.clone(),
+            self.current_user.clone(),
+            self.current_partition.clone(),
+        )
+        .await
+        .map_err(|e| e.to_string());
+        self.apply_fetch_result(result);
+        Ok(())
+    }
 
-        match self.fetch_jobs().await {
+    /// Kick off a fetch on a background task so the UI keeps rendering.
+    /// The result arrives as an [`AppEvent::JobsFetched`] and is applied
+    /// by [`Self::drain_events`]. No-op while a fetch is already running.
+    pub fn start_refresh(&mut self) {
+        if self.is_loading {
+            return;
+        }
+        self.is_loading = true;
+
+        let executor = self.executor.clone();
+        let user = self.current_user.clone();
+        let partition = self.current_partition.clone();
+        let generation = self.refresh_generation;
+        let sender = self.event_sender.clone();
+        tokio::spawn(async move {
+            let result = Self::fetch_jobs(executor, user, partition)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = sender.send(AppEvent::JobsFetched { generation, result });
+        });
+    }
+
+    /// Apply any results that background fetches have delivered.
+    pub fn drain_events(&mut self) {
+        while let Ok(event) = self.event_receiver.try_recv() {
+            match event {
+                AppEvent::JobsFetched { generation, result } => {
+                    if generation == self.refresh_generation {
+                        self.apply_fetch_result(result);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Discard any in-flight fetch and start a fresh one. Called when the
+    /// user/partition filter changes so stale results can't apply.
+    pub fn invalidate_and_refresh(&mut self) {
+        self.refresh_generation += 1;
+        self.is_loading = false;
+        self.start_refresh();
+    }
+
+    fn apply_fetch_result(&mut self, result: Result<Vec<Job>, String>) {
+        match result {
             Ok(jobs) => {
                 let previous_id = self.selected_job.as_ref().map(|j| j.job_id.clone());
                 self.job_list.update(jobs);
                 self.sync_selection(previous_id.as_deref());
-                self.last_refresh = Instant::now();
+                self.error_message = None;
             }
             Err(e) => {
                 self.error_message = Some(format!("Failed to fetch jobs: {}", e));
             }
         }
-
+        self.last_refresh = Instant::now();
         self.is_loading = false;
-        Ok(())
     }
 
-    async fn fetch_jobs(&self) -> Result<Vec<Job>> {
-        let squeue_output = self
-            .executor
-            .squeue(
-                self.current_user.as_deref(),
-                self.current_partition.as_deref(),
-            )
+    async fn fetch_jobs(
+        executor: Arc<dyn SlurmExecutor>,
+        user: Option<String>,
+        partition: Option<String>,
+    ) -> Result<Vec<Job>> {
+        let squeue_output = executor
+            .squeue(user.as_deref(), partition.as_deref())
             .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
         // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)
         for job in jobs.iter_mut().take(10) {
-            if let Ok(scontrol_output) = self.executor.scontrol_show_job(&job.job_id).await
+            if let Ok(scontrol_output) = executor.scontrol_show_job(&job.job_id).await
                 && let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output)
             {
                 SlurmParser::enhance_job_with_scontrol_data(job, fields);
@@ -190,20 +249,11 @@ impl App {
             if let Err(e) = self.executor.scancel(&job.job_id).await {
                 self.error_message = Some(format!("Failed to cancel job {}: {}", job.job_id, e));
             } else {
-                self.refresh_jobs().await?;
+                self.start_refresh();
             }
         }
         self.state = AppState::Normal;
         Ok(())
-    }
-
-    pub fn send_event(&self, event: AppEvent) -> Result<()> {
-        self.event_sender.send(event)?;
-        Ok(())
-    }
-
-    pub async fn receive_event(&mut self) -> Option<AppEvent> {
-        self.event_receiver.recv().await
     }
 }
 

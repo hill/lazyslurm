@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use lazyslurm::slurm::SlurmFixture;
-use lazyslurm::ui::App;
+use lazyslurm::ui::{App, AppEvent};
 
 fn fixture_app(name: &str) -> (App, Arc<SlurmFixture>) {
     let fixture = Arc::new(SlurmFixture::new(format!("tests/fixtures/{name}")));
@@ -54,6 +54,47 @@ async fn refresh_follows_selected_job_by_id() {
 
     assert_eq!(app.selected_job_index, 0);
     assert_eq!(app.selected_job.as_ref().unwrap().job_id, selected_id);
+}
+
+#[tokio::test]
+async fn background_refresh_delivers_jobs_through_events() {
+    let (mut app, _) = fixture_app("basic");
+
+    app.start_refresh();
+    assert!(app.is_loading);
+    assert!(app.job_list.jobs.is_empty());
+
+    // Let the spawned fetch run, then apply its result
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+        app.drain_events();
+        if !app.job_list.jobs.is_empty() {
+            break;
+        }
+    }
+
+    assert_eq!(app.job_list.jobs.len(), 3);
+    assert!(!app.is_loading);
+}
+
+#[tokio::test]
+async fn stale_fetch_results_are_dropped_after_filter_change() {
+    let (mut app, _) = fixture_app("basic");
+    app.refresh_jobs().await.unwrap();
+    assert_eq!(app.job_list.jobs.len(), 3);
+
+    // Filter changes while a fetch from the old filter is still in flight
+    app.invalidate_and_refresh();
+    app.event_sender
+        .send(AppEvent::JobsFetched {
+            generation: 0,
+            result: Ok(vec![]),
+        })
+        .unwrap();
+    app.drain_events();
+
+    // The stale empty result must not clobber the list
+    assert_eq!(app.job_list.jobs.len(), 3);
 }
 
 #[tokio::test]

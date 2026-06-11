@@ -41,11 +41,10 @@ pub async fn handle_text_event(app: &mut App, key: KeyEvent) -> Option<Option<St
     None
 }
 
-pub async fn reset_popup_state_to_normal(app: &mut App) -> Result<(), Box<dyn Error>> {
+pub fn reset_popup_state_to_normal(app: &mut App) {
     app.input.clear();
     app.state = AppState::Normal;
-    app.refresh_jobs().await?;
-    Ok(())
+    app.invalidate_and_refresh();
 }
 
 async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
@@ -56,7 +55,7 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
             return Ok(Some(()));
         }
         (KeyCode::Char('r'), _) => {
-            app.refresh_jobs().await?;
+            app.start_refresh();
         }
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
             app.select_previous_job();
@@ -85,7 +84,7 @@ async fn event_user_search_popup(
     let user_search = handle_text_event(app, key).await;
     if let Some(user) = user_search {
         app.current_user = user;
-        reset_popup_state_to_normal(app).await?;
+        reset_popup_state_to_normal(app);
     }
     Ok(None)
 }
@@ -97,7 +96,7 @@ async fn event_partition_search_popup(
     let partition_search = handle_text_event(app, key).await;
     if let Some(partition) = partition_search {
         app.current_partition = partition;
-        reset_popup_state_to_normal(app).await?;
+        reset_popup_state_to_normal(app);
     }
     Ok(None)
 }
@@ -123,6 +122,7 @@ pub async fn run_event_loop(
     let mut last_tick = Instant::now();
 
     loop {
+        app.drain_events();
         terminal.draw(|frame| render_app(frame, app))?;
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -136,7 +136,7 @@ pub async fn run_event_loop(
         }
 
         if app.should_refresh() {
-            app.refresh_jobs().await?;
+            app.start_refresh();
         }
 
         if last_tick.elapsed() >= tick_rate {
