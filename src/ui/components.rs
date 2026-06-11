@@ -83,12 +83,14 @@ pub fn render_app(frame: &mut Frame, app: &App) {
             render_text_popup("Search Partition:".to_string(), app, frame)
         }
         AppState::CancelJobPopup => {
+            let Some(target) = &app.cancel_target else {
+                return;
+            };
             let popup_area = centered_rect(30, 7, frame.area());
 
             frame.render_widget(Clear, popup_area);
-            let selected_job_id = app.selected_job.clone().unwrap().job_id;
 
-            let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
+            let popup = Paragraph::new(format!("Cancel job id: {}? (y/n)", target.job_id))
                 .style(Style::default().fg(Color::White))
                 .block(
                     Block::default()
@@ -358,10 +360,11 @@ fn read_job_logs(job: &Job) -> String {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let keep: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{keep}...")
     }
 }
 
@@ -383,4 +386,26 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate;
+
+    #[test]
+    fn truncate_handles_multibyte_names() {
+        assert_eq!(truncate("héllo_wörld_jobby", 10), "héllo_w...");
+        assert_eq!(
+            truncate("日本語のジョブ名テスト確認", 10),
+            "日本語のジョブ..."
+        );
+        assert_eq!(truncate("short", 10), "short");
+    }
+
+    #[test]
+    fn truncate_handles_emoji_names() {
+        assert_eq!(truncate("train_😀_model_v2", 10), "train_😀...");
+        assert_eq!(truncate("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀", 10), "🚀🚀🚀🚀🚀🚀🚀...");
+        assert_eq!(truncate("job_🎉", 10), "job_🎉");
+    }
 }

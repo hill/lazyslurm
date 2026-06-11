@@ -58,10 +58,10 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('r'), _) => {
             app.refresh_jobs().await?;
         }
-        (KeyCode::Up, _) => {
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
             app.select_previous_job();
         }
-        (KeyCode::Down, _) => {
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
             app.select_next_job();
         }
         (KeyCode::Char('u'), _) => {
@@ -70,9 +70,8 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('p'), _) => {
             app.state = AppState::PartitionSearchPopup;
         }
-        (KeyCode::Char('c'), _) if app.selected_job.is_some() => {
-            app.confirm_action = false;
-            app.state = AppState::CancelJobPopup;
+        (KeyCode::Char('c'), _) => {
+            app.open_cancel_popup();
         }
         _ => {}
     }
@@ -106,18 +105,13 @@ async fn event_partition_search_popup(
 async fn event_cancel_popup(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     match key.code {
         KeyCode::Char('y') => {
-            app.confirm_action = true;
-            app.state = AppState::Normal;
-            app.refresh_jobs().await?;
+            app.confirm_cancel().await?;
         }
         KeyCode::Char('n') | KeyCode::Esc => {
-            app.confirm_action = false;
-            app.state = AppState::Normal;
-            app.refresh_jobs().await?;
+            app.dismiss_cancel_popup();
         }
         _ => {}
     }
-    app.handle_cancel_popup().await?;
     Ok(None)
 }
 

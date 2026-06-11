@@ -79,7 +79,7 @@ lazyslurm --partition gpu
 |-----------|----------------|----------------------------|
 | `q` or `Ctrl+C` | Normal | Exit application    |
 | `r` | Normal | Refresh jobs    |
-| `↑/↓` | Normal | Navigate job list |
+| `↑/↓` or `j/k` | Normal | Navigate job list |
 | `u` | Normal | Open user search popup |
 | `p` | Normal | Open partition search popup |
 | `c` | Normal | Open cancel job popup (if job selected) |
@@ -89,20 +89,6 @@ lazyslurm --partition gpu
 | `Backspace` | SearchPopup| Delete last input char |
 | `y` | CancelJobPopup | Confirm job cancel |
 | `n` or `Esc` | CancelJobPopup   | Cancel job cancel |
-
-### Configuration
-
-LazySlurm reads configuration from `~/.config/lazyslurm/config.toml`:
-
-```toml
-[display]
-refresh_interval = 5  # seconds
-max_log_lines = 100
-
-[slurm]
-default_user = "myusername"
-default_partition = "compute"
-```
 
 ## Development
 
