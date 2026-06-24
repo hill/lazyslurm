@@ -141,6 +141,7 @@ pub async fn run_event_loop(
 
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
+            app.tick = app.tick.wrapping_add(1);
         }
     }
 }

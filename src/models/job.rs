@@ -124,7 +124,12 @@ impl Job {
     pub fn duration(&self) -> Option<chrono::Duration> {
         match (&self.start_time, &self.end_time) {
             (Some(start), Some(end)) => Some(*end - *start),
-            (Some(start), None) => Some(Utc::now() - *start),
+            // Pending jobs carry SLURM's estimated (future) start time, so
+            // only count elapsed time once the job has actually started.
+            (Some(start), None) => {
+                let elapsed = Utc::now() - *start;
+                (elapsed >= chrono::Duration::zero()).then_some(elapsed)
+            }
             _ => None,
         }
     }
@@ -168,5 +173,25 @@ impl JobList {
 impl Default for JobList {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_job_with_estimated_future_start_has_no_duration() {
+        let mut job = Job::new("1".into(), "j".into(), "u".into(), JobState::Pending);
+        job.start_time = Some(Utc::now() + chrono::Duration::hours(1));
+        assert_eq!(job.duration(), None);
+    }
+
+    #[test]
+    fn running_job_reports_elapsed_duration() {
+        let mut job = Job::new("1".into(), "j".into(), "u".into(), JobState::Running);
+        job.start_time = Some(Utc::now() - chrono::Duration::seconds(30));
+        let d = job.duration().expect("should have a duration");
+        assert!(d.num_seconds() >= 30 && d.num_seconds() < 120);
     }
 }

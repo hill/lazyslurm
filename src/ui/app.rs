@@ -44,6 +44,10 @@ pub struct App {
     /// Bumped whenever the user/partition filter changes, so results from
     /// fetches started under the old filter are dropped on arrival.
     refresh_generation: u64,
+    /// Frame counter driven by the event loop, used to animate the spinner.
+    pub tick: u64,
+    /// Quote shown on the empty-state panel, picked once per session.
+    pub quote: crate::ui::quotes::Quote,
 }
 
 impl App {
@@ -71,6 +75,8 @@ impl App {
             input: "".to_string(),
             executor,
             refresh_generation: 0,
+            tick: 0,
+            quote: crate::ui::quotes::pick(),
         }
     }
 

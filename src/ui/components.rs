@@ -1,40 +1,44 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    prelude::Alignment,
-    style::{Color, Modifier, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 use std::fs;
 
 use crate::slurm::SlurmParser;
+use crate::ui::theme;
 use crate::ui::App;
-use crate::{
-    AppState,
-    models::{Job, JobState},
-};
+use crate::{AppState, models::Job};
 
-fn render_text_popup(popup_text: String, app: &App, frame: &mut Frame) {
-    let popup_area = centered_rect(30, 9, frame.area());
+fn render_text_popup(title: &str, app: &App, frame: &mut Frame) {
+    let popup_area = centered_rect(36, 9, frame.area());
     frame.render_widget(Clear, popup_area);
 
     let popup = Paragraph::new(app.input.as_str())
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(popup_text)
-                .style(Style::default().fg(Color::Yellow)),
-        )
+        .style(Style::default().fg(theme::FG))
+        .block(popup_block(title))
         .wrap(Wrap { trim: true })
         .alignment(Alignment::Center);
 
     frame.render_widget(popup, popup_area);
 }
 
+fn popup_block(title: &str) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::ACCENT))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ))
+}
+
 pub fn render_app(frame: &mut Frame, app: &App) {
-    // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -44,10 +48,8 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
-    // Render status bar
     render_status_bar(frame, app, chunks[0]);
 
-    // Main content area - split horizontally
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -56,10 +58,8 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         ])
         .split(chunks[1]);
 
-    // Render jobs list
     render_jobs_list(frame, app, main_chunks[0]);
 
-    // Right side - split vertically for details, logs, and summary
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -69,38 +69,46 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         ])
         .split(main_chunks[1]);
 
-    // Render details, logs, and summary
     render_job_details(frame, app, right_chunks[0]);
     render_job_logs(frame, app, right_chunks[1]);
     render_quick_info(frame, app, right_chunks[2]);
 
-    // Render help bar
     render_help_bar(app.state, frame, chunks[2]);
 
     match app.state {
-        AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
-        AppState::PartitionSearchPopup => {
-            render_text_popup("Search Partition:".to_string(), app, frame)
-        }
+        AppState::UserSearchPopup => render_text_popup("Search user", app, frame),
+        AppState::PartitionSearchPopup => render_text_popup("Search partition", app, frame),
         AppState::CancelJobPopup => {
             let Some(target) = &app.cancel_target else {
                 return;
             };
-            let popup_area = centered_rect(30, 7, frame.area());
-
+            let popup_area = centered_rect(36, 7, frame.area());
             frame.render_widget(Clear, popup_area);
 
-            let popup = Paragraph::new(format!("Cancel job id: {}? (y/n)", target.job_id))
-                .style(Style::default().fg(Color::White))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Confirm")
-                        .style(Style::default().fg(Color::Yellow)),
-                )
-                .wrap(Wrap { trim: true })
-                .alignment(Alignment::Center);
+            let body = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Cancel job ", Style::default().fg(theme::FG)),
+                    Span::styled(
+                        target.job_id.clone(),
+                        Style::default()
+                            .fg(theme::ACCENT_PINK)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ?", Style::default().fg(theme::FG)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("y", Style::default().fg(theme::RUNNING).add_modifier(Modifier::BOLD)),
+                    Span::styled(" confirm    ", Style::default().fg(theme::MUTED)),
+                    Span::styled("n", Style::default().fg(theme::FAILED).add_modifier(Modifier::BOLD)),
+                    Span::styled(" cancel", Style::default().fg(theme::MUTED)),
+                ]),
+            ];
 
+            let popup = Paragraph::new(body)
+                .block(popup_block("Confirm"))
+                .alignment(Alignment::Center);
             frame.render_widget(popup, popup_area);
         }
         _ => {}
@@ -108,110 +116,141 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mut status_text = "LazySlurm".to_string();
+    if let Some(error) = &app.error_message {
+        let line = Line::from(vec![
+            Span::styled(
+                " ✖ ",
+                Style::default().bg(theme::FAILED).fg(theme::BADGE_FG),
+            ),
+            Span::styled(
+                format!("  {error}"),
+                Style::default().fg(theme::FAILED).add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(14)])
+        .split(area);
+
+    let mut left = vec![Span::styled(
+        " ❄ lazyslurm ",
+        Style::default()
+            .bg(theme::ACCENT)
+            .fg(theme::BADGE_FG)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    let sep = || Span::styled("  ·  ", Style::default().fg(theme::DIM_BORDER));
 
     if let Some(user) = &app.current_user {
-        status_text.push_str(&format!(" - User: {}", user));
+        left.push(sep());
+        left.push(Span::styled("user ", Style::default().fg(theme::MUTED)));
+        left.push(Span::styled(user.clone(), Style::default().fg(theme::FG)));
     }
 
     if let Some(part) = &app.current_partition {
-        status_text.push_str(&format!(" - Part: {}", part));
+        left.push(sep());
+        left.push(Span::styled("part ", Style::default().fg(theme::MUTED)));
+        left.push(Span::styled(part.clone(), Style::default().fg(theme::FG)));
     }
 
-    status_text.push_str(&format!(" - Jobs: {}", app.job_list.jobs.len()));
+    left.push(sep());
+    left.push(Span::styled(
+        format!("{}", app.job_list.jobs.len()),
+        Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+    ));
+    left.push(Span::styled(" jobs", Style::default().fg(theme::MUTED)));
+
+    frame.render_widget(Paragraph::new(Line::from(left)), cols[0]);
 
     if app.is_loading {
-        status_text.push_str(" - Loading...");
+        let right = Line::from(vec![
+            Span::styled(
+                theme::spinner_frame(app.tick),
+                Style::default().fg(theme::ACCENT),
+            ),
+            Span::styled(" refresh ", Style::default().fg(theme::MUTED)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(right).alignment(Alignment::Right),
+            cols[1],
+        );
     }
-
-    if let Some(error) = &app.error_message {
-        status_text = format!("ERROR: {}", error);
-    }
-
-    let status = Paragraph::new(status_text).style(if app.error_message.is_some() {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    });
-
-    frame.render_widget(status, area);
 }
 
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!("Jobs ({})", app.job_list.jobs.len());
+    let block = theme::panel(&title, true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+
+    let header = Line::from(Span::styled(
+        format!("  {:<7}{:<15}{:<8}STATE", "JOBID", "NAME", "TIME"),
+        Style::default().fg(theme::MUTED),
+    ));
+    frame.render_widget(Paragraph::new(header), rows[0]);
+
     let jobs: Vec<ListItem> = app
         .job_list
         .jobs
         .iter()
         .enumerate()
         .map(|(i, job)| {
-            let style = if i == app.selected_job_index {
-                Style::default().bg(Color::Blue).fg(Color::White)
+            let selected = i == app.selected_job_index;
+            let base = if selected {
+                Style::default().bg(theme::SELECT_BG)
             } else {
                 Style::default()
             };
 
-            let state_color = match job.state {
-                JobState::Running => Color::Green,
-                JobState::Pending => Color::Yellow,
-                JobState::Completed => Color::Cyan,
-                JobState::Failed => Color::Red,
-                JobState::Cancelled => Color::Magenta,
-                _ => Color::Gray,
+            let rail = if selected {
+                Span::styled("▌ ", Style::default().fg(theme::ACCENT))
+            } else {
+                Span::styled("  ", base)
             };
 
-            let job_id = job.display_id();
-            let job_name = truncate(&job.name, 15);
+            let job_id = truncate(&job.display_id(), 6);
+            let job_name = truncate(&job.name, 14);
             let time_used = job.time_used.as_deref().unwrap_or("--");
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<12} ", job_id), Style::default()),
-                Span::styled(format!("{:<15} ", job_name), Style::default()),
-                Span::styled(format!("{} ", job.state), Style::default().fg(state_color)),
-                Span::styled(time_used.to_string(), Style::default()),
+                rail,
+                Span::styled(format!("{:<7}", job_id), base.fg(theme::FG)),
+                Span::styled(format!("{:<15}", job_name), base.fg(theme::FG)),
+                Span::styled(format!("{:<8}", time_used), base.fg(theme::MUTED)),
+                theme::state_badge(&job.state),
             ]))
-            .style(style)
+            .style(base)
         })
         .collect();
 
-    let title = format!("Jobs ({} total)", app.job_list.jobs.len());
-    let jobs_list = List::new(jobs)
-        .block(Block::default().title(title).borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-
-    frame.render_widget(jobs_list, area);
+    frame.render_widget(List::new(jobs), rows[1]);
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
-    let details = if let Some(job) = app.get_selected_job() {
-        Paragraph::new(format_job_details(job))
-            .block(Block::default().title("Job Details").borders(Borders::ALL))
-            .wrap(Wrap { trim: true })
+    let block = theme::panel("Details", false);
+
+    let body = if let Some(job) = app.get_selected_job() {
+        job_detail_lines(job)
     } else if app.job_list.jobs.is_empty() {
-        let lines = vec![
-            Line::from(""),
-            Line::from("        L A Z Y S L U R M       "),
-            Line::from("    Tom Hill 2025 - tom@hill.xyz"),
-            Line::from(""),
-            Line::from(""),
-            Line::from("No jobs found!"),
-            Line::from(""),
-            Line::from("Try running: lazyslurm --user <username>"),
-            Line::from("or check if SLURM is available."),
-            Line::from(""),
-            Line::from(Span::styled(
-                "\"We do not remember days; we remember moments.\" - Cesare Pavese",
-                Style::default().add_modifier(Modifier::ITALIC),
-            )),
-        ];
-        Paragraph::new(lines)
-            .block(Block::default().title("Job Details").borders(Borders::ALL))
-            .wrap(Wrap { trim: false })
+        empty_state_lines(app.quote)
     } else {
-        Paragraph::new("Select a job to view details")
-            .block(Block::default().title("Job Details").borders(Borders::ALL))
-            .wrap(Wrap { trim: true })
+        vec![Line::styled(
+            "Select a job to view details",
+            Style::default().fg(theme::MUTED),
+        )]
     };
 
+    let details = Paragraph::new(body).block(block).wrap(Wrap { trim: false });
     frame.render_widget(details, area);
 }
 
@@ -223,108 +262,194 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let logs = Paragraph::new(content)
-        .block(Block::default().title("Job Logs").borders(Borders::ALL))
+        .style(Style::default().fg(theme::FG))
+        .block(theme::panel("Logs", false))
         .wrap(Wrap { trim: true });
 
     frame.render_widget(logs, area);
 }
 
 fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
-    let running_count = app.running_jobs().len();
-    let pending_count = app.pending_jobs().len();
-    let completed_count = app.completed_jobs().len();
+    let running = app.running_jobs().len();
+    let pending = app.pending_jobs().len();
+    let completed = app.completed_jobs().len();
 
-    let content = format!(
-        "Running: {} | Pending: {} | Completed: {}",
-        running_count, pending_count, completed_count
-    );
+    let chips = Line::from(vec![
+        count_chip(running, "running", theme::RUNNING),
+        Span::raw("  "),
+        count_chip(pending, "pending", theme::PENDING),
+        Span::raw("  "),
+        count_chip(completed, "done", theme::COMPLETED),
+    ]);
 
-    let quick_info =
-        Paragraph::new(content).block(Block::default().title("Summary").borders(Borders::ALL));
+    let bar = proportion_bar(running, pending, completed, 26);
 
-    frame.render_widget(quick_info, area);
+    let body = vec![Line::from(""), chips, Line::from(""), bar];
+    let info = Paragraph::new(body).block(theme::panel("Summary", false));
+    frame.render_widget(info, area);
 }
 
 fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
-    let help_text = match app_state {
-        AppState::Normal => {
-            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user"
+    let pairs: &[(&str, &str)] = match app_state {
+        AppState::Normal => &[
+            ("q", "quit"),
+            ("↑↓", "nav"),
+            ("r", "refresh"),
+            ("c", "cancel"),
+            ("p", "partition"),
+            ("u", "user"),
+        ],
+        AppState::CancelJobPopup => &[("y", "confirm"), ("n", "reject"), ("esc", "reject")],
+        AppState::PartitionSearchPopup | AppState::UserSearchPopup => {
+            &[("esc", "close"), ("Enter", "submit")]
         }
-        AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
-        AppState::PartitionSearchPopup => "esc: close | Enter: submit",
-        AppState::UserSearchPopup => "esc: close | Enter: submit",
     };
-    let help = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL))
-        .style(Style::default().fg(Color::Gray));
+
+    let mut spans = Vec::new();
+    for (i, (key, label)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("   ", Style::default().fg(theme::DIM_BORDER)));
+        }
+        spans.extend(theme::key_hint(key, label));
+    }
+
+    let help = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::DIM_BORDER)),
+    );
 
     frame.render_widget(help, area);
 }
 
-fn format_job_details(job: &Job) -> String {
-    let mut details = Vec::new();
+fn count_chip(count: usize, label: &str, color: ratatui::style::Color) -> Span<'static> {
+    Span::styled(
+        format!("● {count} {label}"),
+        Style::default().fg(color),
+    )
+}
 
-    let state_description = match job.state {
-        JobState::Running => "Running",
-        JobState::Pending => "Pending",
-        JobState::Completed => "Completed",
-        JobState::Cancelled => "Cancelled",
-        JobState::Failed => "Failed",
-        JobState::Timeout => "Timeout",
-        JobState::NodeFail => "Node Fail",
-        JobState::Preempted => "Preempted",
-        JobState::Unknown(_) => "Unknown",
-    };
+fn proportion_bar(running: usize, pending: usize, completed: usize, width: usize) -> Line<'static> {
+    let total = running + pending + completed;
+    if total == 0 {
+        return Line::from(Span::styled(
+            "░".repeat(width),
+            Style::default().fg(theme::DIM_BORDER),
+        ));
+    }
 
-    details.push(format!("Job ID: {}", job.display_id()));
-    details.push(format!("Name: {}", job.name));
-    details.push(format!("User: {}", job.user));
-    details.push(format!("State: {} ({})", job.state, state_description));
-    details.push(format!("Partition: {}", job.partition));
+    let cells = |n: usize| ((n as f32 / total as f32) * width as f32).round() as usize;
+    let r = cells(running);
+    let p = cells(pending);
+    let c = cells(completed);
+    let rest = width.saturating_sub(r + p + c);
+
+    Line::from(vec![
+        Span::styled("█".repeat(r), Style::default().fg(theme::RUNNING)),
+        Span::styled("█".repeat(p), Style::default().fg(theme::PENDING)),
+        Span::styled("█".repeat(c), Style::default().fg(theme::COMPLETED)),
+        Span::styled("░".repeat(rest), Style::default().fg(theme::DIM_BORDER)),
+    ])
+}
+
+fn empty_state_lines(quote: crate::ui::quotes::Quote) -> Vec<Line<'static>> {
+    let (text, author) = quote;
+    vec![
+        Line::from(""),
+        theme::gradient_line("L A Z Y S L U R M"),
+        Line::styled(
+            "a tiny SLURM dashboard",
+            Style::default().fg(theme::MUTED),
+        ),
+        Line::from(""),
+        Line::styled("No jobs found", Style::default().fg(theme::FG)),
+        Line::from(""),
+        Line::styled(
+            "Try: lazyslurm --user <username>",
+            Style::default().fg(theme::MUTED),
+        ),
+        Line::styled(
+            "or check that SLURM is reachable.",
+            Style::default().fg(theme::MUTED),
+        ),
+        Line::from(""),
+        Line::styled(
+            format!("\"{text}\""),
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
+        Line::from(Span::styled(
+            format!("— {author}"),
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ))
+        .alignment(Alignment::Right),
+    ]
+}
+
+fn kv(key: &str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{key:<11}"), Style::default().fg(theme::MUTED)),
+        Span::styled(value, Style::default().fg(theme::FG)),
+    ])
+}
+
+fn job_detail_lines(job: &Job) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", job.display_id()),
+                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(job.name.clone(), Style::default().fg(theme::MUTED)),
+        ]),
+        Line::from(theme::state_badge(&job.state)),
+        Line::from(""),
+        kv("User", job.user.clone()),
+        kv("Partition", job.partition.clone()),
+    ];
 
     if let Some(nodes) = job.nodes {
-        details.push(format!("Nodes: {}", nodes));
+        lines.push(kv("Nodes", nodes.to_string()));
     }
-
     if let Some(node_list) = &job.node_list {
-        details.push(format!("Node List: {}", node_list));
+        lines.push(kv("Node list", node_list.clone()));
     }
-
     if let Some(submit_time) = &job.submit_time {
-        details.push(format!(
-            "Submitted: {}",
-            submit_time.format("%Y-%m-%d %H:%M:%S")
+        lines.push(kv(
+            "Submitted",
+            submit_time.format("%Y-%m-%d %H:%M:%S").to_string(),
         ));
     }
-
     if let Some(start_time) = &job.start_time {
-        details.push(format!(
-            "Started: {}",
-            start_time.format("%Y-%m-%d %H:%M:%S")
+        let label = if matches!(job.state, crate::models::JobState::Pending) {
+            "Est. start"
+        } else {
+            "Started"
+        };
+        lines.push(kv(label, start_time.format("%Y-%m-%d %H:%M:%S").to_string()));
+    }
+    if let Some(duration) = job.duration() {
+        let total = duration.num_seconds();
+        lines.push(kv(
+            "Duration",
+            format!("{}h {}m {}s", total / 3600, (total % 3600) / 60, total % 60),
         ));
     }
-
-    if let Some(duration) = job.duration() {
-        let total_seconds = duration.num_seconds();
-        let hours = total_seconds / 3600;
-        let minutes = (total_seconds % 3600) / 60;
-        let seconds = total_seconds % 60;
-        details.push(format!("Duration: {}h {}m {}s", hours, minutes, seconds));
-    }
-
     if let Some(working_dir) = &job.working_dir {
-        details.push(format!("Work Dir: {}", working_dir));
+        lines.push(kv("Work dir", working_dir.clone()));
     }
-
     if let Some(std_out) = &job.std_out {
-        details.push(format!("Log File: {}", std_out));
+        lines.push(kv("Log file", std_out.clone()));
     }
-
     if let Some(reason) = &job.reason {
-        details.push(format!("Reason: {}", reason));
+        lines.push(kv("Reason", reason.clone()));
     }
 
-    details.join("\n")
+    lines
 }
 
 fn read_job_logs(job: &Job) -> String {
