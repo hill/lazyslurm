@@ -9,9 +9,11 @@ default:
 dev:
     cargo run
 
-# Run lazyslurm inside the SLURM container (for local dev without SLURM)
+# Run lazyslurm inside the SLURM container (for local dev without SLURM).
+# Uses a separate target dir so the container's Linux build never clobbers
+# the host's macOS build artifacts in target/.
 dev-docker:
-    docker exec -it lazyslurm_dev bash -c "cd /workspace && cargo run"
+    docker exec -it -e CARGO_TARGET_DIR=/workspace/target-linux lazyslurm_dev cargo run
 
 # Build and start SLURM development environment
 slurm_up:
