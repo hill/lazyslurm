@@ -11,7 +11,7 @@ documentation = "https://docs.rs/lazyslurm"
 readme = "README.md"
 keywords = ["slurm", "hpc", "terminal", "tui", "cluster"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["dev/", ".github/", "*.png", "*.jpg"]
+exclude = ["dev/", ".github/", "media/", "scripts/", "*.png", "*.jpg"]
 
 [[bin]]
 name = "lazyslurm"

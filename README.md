@@ -1,23 +1,34 @@
-# LazySlurm
+<p align="center">
+  <img src="media/logo.svg" alt="lazyslurm" width="620">
+</p>
 
-[![CI](https://github.com/hill/lazyslurm/workflows/CI/badge.svg)](https://github.com/hill/lazyslurm/actions)
-[![Crates.io](https://img.shields.io/crates/v/lazyslurm.svg)](https://crates.io/crates/lazyslurm)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  A terminal UI for <a href="https://slurm.schedmd.com/overview.html">Slurm</a>. Like <a href="https://github.com/jesseduffield/lazygit">lazygit</a>, but for HPC clusters.
+</p>
 
-A terminal UI for [slurm](https://slurm.schedmd.com/overview.html) job management. Like the awesome [lazygit](https://github.com/jesseduffield/lazygit) but for HPC clusters.
+<p align="center">
+  <a href="https://github.com/hill/lazyslurm/actions"><img src="https://github.com/hill/lazyslurm/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/lazyslurm"><img src="https://img.shields.io/crates/v/lazyslurm.svg" alt="Crates.io"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
-![LazySlurm Screenshot](screenshot.png)
+<p align="center">
+  <video src="https://github.com/hill/lazyslurm/raw/master/media/demo.mp4" controls muted width="860"></video>
+</p>
 
 ## Why This Exists
 
-Slurm's CLI is powerful but clunky for monitoring. This project gives you the lazygit experience.
-Built in Rust with ratatui because single binaries are beautiful on HPC systems.
+Slurm's CLI is powerful but clunky for monitoring. This gives you the lazygit experience for your cluster. Built in Rust with [ratatui](https://ratatui.rs/) because a single static binary is beautiful on HPC systems.
 
 ## Features
 
-- **Job management** - Cancel jobs, view details, and monitor resource usage
-- **Single binary** - No dependencies, perfect for HPC environments
-- **Real-time job monitoring** - Watch your jobs as they run, with live log tailing
+- **Tabbed views**: `Jobs`, `Nodes`, `Partitions`, and `History`, switchable with `Tab` or the number keys (and clickable).
+- **Jobs**: live log tailing, job details, and one-key cancel. Filter the list by name or id as you type, and pin the jobs you care about to the top.
+- **Nodes**: per-node state, CPU load, free memory, and GPU (gres) allocation across the cluster.
+- **Partitions**: availability, idle/allocated node counts, and time limits.
+- **History**: finished jobs from `sacct`, with a detail view showing requested vs actual peak memory, exit codes, and a best-effort log tail.
+- **Raw log view**: drop to a plain, borderless log so your terminal's own selection works for copying.
+- **Single binary**: no runtime dependencies, perfect for HPC environments.
 
 ## Installation
 
@@ -61,51 +72,78 @@ gah install hill/lazyslurm
 
 ## Usage
 
-### Basic Usage
-
 ```bash
-# Monitor all jobs for current user
+# Monitor all jobs for the current user
 lazyslurm
 
-# Monitor jobs for specific user
+# Filter to a specific user
 lazyslurm --user username
 
-# Monitor jobs in specific partition
+# Filter to a specific partition
 lazyslurm --partition gpu
 ```
 
+The `Jobs` tab works without any extra setup. The `Nodes` and `Partitions` tabs use `sinfo`, and `History` uses `sacct` (which needs Slurm accounting enabled on the cluster).
+
 ### Keyboard Controls
-| Key       | Context        | Action                     |
-|-----------|----------------|----------------------------|
-| `q` or `Ctrl+C` | Normal | Exit application    |
-| `r` | Normal | Refresh jobs    |
-| `↑/↓` or `j/k` | Normal | Navigate job list |
-| `u` | Normal | Open user search popup |
-| `p` | Normal | Open partition search popup |
-| `c` | Normal | Open cancel job popup (if job selected) |
-| `Enter` | SearchPopup| Confirm user input |
-| `Esc` | SearchPopup| Cancel user input |
-| `Char(c)` | SearchPopup| Append to input |
-| `Backspace` | SearchPopup| Delete last input char |
-| `y` | CancelJobPopup | Confirm job cancel |
-| `n` or `Esc` | CancelJobPopup   | Cancel job cancel |
+
+**Global**
+
+| Key | Action |
+|-----|--------|
+| `q` / `Ctrl+C` | Quit |
+| `Tab` / `Shift+Tab` | Switch tabs |
+| `1`–`4` | Jump to a tab |
+| `↑/↓` or `j/k` | Navigate the current list |
+| `r` | Refresh |
+| `u` | Filter by user |
+
+**Jobs tab**
+
+| Key | Action |
+|-----|--------|
+| `←/→` or `h/l` | Move focus between panels |
+| `Enter` | Fullscreen the focused pane |
+| `/` | Filter the list by name or id |
+| `P` | Pin / unpin the selected job |
+| `c` | Cancel the selected job |
+| `y` | Raw log view (with the Logs pane focused) |
+
+**History tab**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open the job detail view |
+| `y` | Raw log view (in the detail view) |
+
+**Log views**
+
+| Key | Action |
+|-----|--------|
+| `G` / `g` | Follow the tail |
+| `y` | Open the raw view, then drag-select to copy |
+| `Esc` | Back |
 
 ## Development
 
-Requires Docker and [just](https://github.com/casey/just).
+Requires Docker and [just](https://github.com/casey/just). The dev container runs a full Slurm install with accounting (slurmdbd + MariaDB), so every tab works locally.
 
 ```bash
-# Start SLURM container
+# Build and start the Slurm container
 just slurm_up
 
-# Get into container for development
+# Get a shell inside it
 just slurm_shell
 
-# Inside container: your code is at /workspace
+# Inside the container (your code is mounted at /workspace)
 cargo run
 
-# Submit test jobs (from host or container)
+# Submit some test jobs
 just slurm_populate
 ```
 
-Your source code is mounted into the container so changes are immediately available.
+Your source is mounted into the container, so changes are picked up immediately.
+
+## License
+
+MIT

@@ -1,3 +1,6 @@
 /target
 /target-linux
 .DS_Store
+
+# Source recording; the compressed media/demo.mp4 is committed instead
+media/*.mov
