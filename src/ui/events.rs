@@ -1,5 +1,5 @@
-use crate::app::{App, AppState, FocusPanel};
-use crate::{panel_rects, render_app};
+use crate::app::{ActiveTab, App, AppState, FocusPanel};
+use crate::{panel_rects, render_app, tab_rects};
 use ratatui::crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
 };
@@ -18,7 +18,39 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::CancelJobPopup => event_cancel_popup(app, key).await,
         AppState::PartitionSearchPopup => event_partition_search_popup(app, key).await,
         AppState::Fullscreen => event_fullscreen(app, key),
+        AppState::HistoryDetail => event_history_detail(app, key),
+        AppState::FilterInput => event_filter_input(app, key),
     }
+}
+
+/// Live filter typing. Every keystroke re-filters the in-memory list, so it is
+/// instant. Esc drops the filter; Enter keeps it and returns to navigation.
+fn event_filter_input(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _) => app.clear_filter(),
+        (KeyCode::Enter, _) => app.commit_filter(),
+        (KeyCode::Backspace, _) => app.filter_backspace(),
+        (KeyCode::Char(c), _) => app.filter_push(c),
+        _ => {}
+    }
+    Ok(None)
+}
+
+fn event_history_detail(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    const PAGE: u16 = 10;
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) | (KeyCode::Char('Q'), _) => {
+            app.close_history_detail();
+        }
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.history_detail_scroll_up(1),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.history_detail_scroll_down(1),
+        (KeyCode::PageUp, _) => app.history_detail_scroll_up(PAGE),
+        (KeyCode::PageDown, _) => app.history_detail_scroll_down(PAGE),
+        _ => {}
+    }
+    Ok(None)
 }
 
 pub async fn handle_text_event(app: &mut App, key: KeyEvent) -> Option<Option<String>> {
@@ -49,6 +81,8 @@ pub fn reset_popup_state_to_normal(app: &mut App) {
     app.input.clear();
     app.state = AppState::Normal;
     app.invalidate_and_refresh();
+    // History is user-scoped, so a filter change should reflect there too.
+    app.refresh_active_tab();
 }
 
 async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
@@ -61,22 +95,33 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         }
         (KeyCode::Char('r'), _) => {
             app.start_refresh();
+            app.refresh_active_tab();
         }
-        (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
+        (KeyCode::Tab, _) => app.next_tab(),
+        (KeyCode::BackTab, _) => app.prev_tab(),
+        (KeyCode::Char('1'), _) => app.switch_tab(ActiveTab::Jobs),
+        (KeyCode::Char('2'), _) => app.switch_tab(ActiveTab::Nodes),
+        (KeyCode::Char('3'), _) => app.switch_tab(ActiveTab::Partitions),
+        (KeyCode::Char('4'), _) => app.switch_tab(ActiveTab::History),
+        (KeyCode::Left, _) | (KeyCode::Char('h'), _) if app.active_tab == ActiveTab::Jobs => {
             app.focus_left();
         }
-        (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
+        (KeyCode::Right, _) | (KeyCode::Char('l'), _) if app.active_tab == ActiveTab::Jobs => {
             app.focus_right();
         }
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-            if app.focus == FocusPanel::Jobs {
+            if app.active_tab != ActiveTab::Jobs {
+                app.list_prev();
+            } else if app.focus == FocusPanel::Jobs {
                 app.select_previous_job();
             } else {
                 app.focus_up();
             }
         }
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-            if app.focus == FocusPanel::Jobs {
+            if app.active_tab != ActiveTab::Jobs {
+                app.list_next();
+            } else if app.focus == FocusPanel::Jobs {
                 app.select_next_job();
             } else {
                 app.focus_down();
@@ -85,8 +130,11 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         // Inline scroll for the right-hand panes; arrows are reserved for focus.
         (KeyCode::PageUp, _) => app.scroll_focused_up(PAGE),
         (KeyCode::PageDown, _) => app.scroll_focused_down(PAGE),
-        (KeyCode::Enter, _) => {
+        (KeyCode::Enter, _) if app.active_tab == ActiveTab::Jobs => {
             app.open_fullscreen();
+        }
+        (KeyCode::Enter, _) if app.active_tab == ActiveTab::History => {
+            app.open_history_detail();
         }
         (KeyCode::Char('u'), _) => {
             app.state = AppState::UserSearchPopup;
@@ -94,8 +142,18 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('p'), _) => {
             app.state = AppState::PartitionSearchPopup;
         }
-        (KeyCode::Char('c'), _) => {
+        (KeyCode::Char('c'), _) if app.active_tab == ActiveTab::Jobs => {
             app.open_cancel_popup();
+        }
+        (KeyCode::Char('/'), _) if app.active_tab == ActiveTab::Jobs => {
+            app.open_filter();
+        }
+        // Esc clears an active filter without entering filter mode first.
+        (KeyCode::Esc, _) if app.active_tab == ActiveTab::Jobs && !app.filter_query.is_empty() => {
+            app.clear_filter();
+        }
+        (KeyCode::Char('P'), _) if app.active_tab == ActiveTab::Jobs => {
+            app.toggle_pin();
         }
         _ => {}
     }
@@ -191,6 +249,7 @@ pub async fn run_event_loop(
 
         if app.should_refresh() {
             app.start_refresh();
+            app.refresh_active_tab();
         }
 
         if last_tick.elapsed() >= tick_rate {
@@ -200,18 +259,37 @@ pub async fn run_event_loop(
     }
 }
 
-/// Click a panel to focus it, wheel to scroll the focused panel. Only acts on
-/// the dashboard, where the panels are laid out. Reuses `panel_rects` so the
-/// hit-testing can't drift from what's drawn.
+/// Click a tab to switch to it, click a panel to focus it, wheel to scroll the
+/// focused panel. Reuses `tab_rects`/`panel_rects` so the hit-testing can't
+/// drift from what's drawn.
 fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
     if app.state != AppState::Normal {
+        return;
+    }
+
+    // Clicking a tab switches to it, on every tab.
+    if let MouseEventKind::Down(_) = mouse.kind
+        && let Some(tab) = tab_rects(area).hit(mouse.column, mouse.row)
+    {
+        app.switch_tab(tab);
+        return;
+    }
+
+    // Panel hit-testing and the focus model only exist on the Jobs dashboard.
+    // On the cluster tabs the wheel just moves the list selection.
+    if app.active_tab != ActiveTab::Jobs {
+        match mouse.kind {
+            MouseEventKind::ScrollDown => app.list_next(),
+            MouseEventKind::ScrollUp => app.list_prev(),
+            _ => {}
+        }
         return;
     }
 
     let main = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // status bar
+            Constraint::Length(1), // status bar (title + tabs)
             Constraint::Min(0),    // panels
             Constraint::Length(3), // help bar
         ])

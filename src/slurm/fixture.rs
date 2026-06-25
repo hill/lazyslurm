@@ -50,4 +50,31 @@ impl SlurmExecutor for SlurmFixture {
         self.cancelled.lock().unwrap().push(job_id.to_string());
         Ok(())
     }
+
+    async fn sinfo_nodes(&self) -> Result<String> {
+        let path = self.fixture_dir.join("sinfo_nodes.txt");
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read fixture: {}", path.display()))
+    }
+
+    async fn sinfo_partitions(&self) -> Result<String> {
+        let path = self.fixture_dir.join("sinfo_partitions.txt");
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read fixture: {}", path.display()))
+    }
+
+    async fn sacct(&self, _user: Option<&str>) -> Result<String> {
+        let path = self.fixture_dir.join("sacct.txt");
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read fixture: {}", path.display()))
+    }
+
+    async fn sacct_job(&self, job_id: &str) -> Result<String> {
+        let path = self
+            .fixture_dir
+            .join("sacct_job")
+            .join(format!("{}.txt", job_id));
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read fixture: {}", path.display()))
+    }
 }

@@ -5,10 +5,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
-use crate::slurm::logs::{LogRead, TAIL_BYTES, read_tail_for_job};
+use crate::slurm::SlurmParser;
+use crate::slurm::logs::{LogRead, TAIL_BYTES, read_tail_for_job, read_tail_for_paths};
 use crate::ui::theme;
-use crate::ui::{App, FocusPanel};
-use crate::{AppState, models::Job};
+use crate::ui::{ActiveTab, App, FocusPanel};
+use crate::{
+    AppState,
+    models::{AcctDetail, AcctEntry, Job, Node},
+};
 
 fn render_text_popup(title: &str, app: &App, frame: &mut Frame) {
     let popup_area = centered_rect(36, 9, frame.area());
@@ -42,10 +46,15 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         return;
     }
 
+    if app.state == AppState::HistoryDetail {
+        render_history_detail(frame, app, frame.area());
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Status bar
+            Constraint::Length(1), // Status bar (title + tabs)
             Constraint::Min(0),    // Main content
             Constraint::Length(3), // Help/actions bar
         ])
@@ -53,14 +62,14 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
     render_status_bar(frame, app, chunks[0]);
 
-    let rects = panel_rects(chunks[1]);
-    render_jobs_list(frame, app, rects.jobs);
-    render_right_header(frame, app, rects.right_header);
-    render_job_details(frame, app, rects.details);
-    render_job_logs(frame, app, rects.logs);
-    render_quick_info(frame, app, rects.summary);
+    match app.active_tab {
+        ActiveTab::Jobs => render_jobs_dashboard(frame, app, chunks[1]),
+        ActiveTab::Nodes => render_nodes_tab(frame, app, chunks[1]),
+        ActiveTab::Partitions => render_partitions_tab(frame, app, chunks[1]),
+        ActiveTab::History => render_history_tab(frame, app, chunks[1]),
+    }
 
-    render_help_bar(app.state, frame, chunks[2]);
+    render_help_bar(app, frame, chunks[2]);
 
     match app.state {
         AppState::UserSearchPopup => render_text_popup("Search user", app, frame),
@@ -102,6 +111,109 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     }
 }
 
+/// The original Jobs view: the five-panel dashboard.
+fn render_jobs_dashboard(frame: &mut Frame, app: &App, area: Rect) {
+    let rects = panel_rects(area);
+    render_jobs_list(frame, app, rects.jobs);
+    render_right_header(frame, app, rects.right_header);
+    render_job_details(frame, app, rects.details);
+    render_job_logs(frame, app, rects.logs);
+}
+
+/// The tab strip, sat inline at the right of the status bar. The active tab
+/// gets a filled accent pill; the rest sit muted. Returns the spans and their
+/// display width so the caller can reserve exactly that much room on the right.
+/// The width stays constant regardless of state, so the right-aligned tabs
+/// never shift (the refresh spinner lives on the left, not here).
+fn tab_strip(app: &App) -> (Vec<Span<'static>>, u16) {
+    let mut spans = Vec::new();
+
+    for (i, tab) in ActiveTab::ALL.iter().enumerate() {
+        let active = *tab == app.active_tab;
+        let label = tab_cell(i, tab);
+        if active {
+            spans.push(Span::styled(
+                label,
+                Style::default()
+                    .bg(theme::ACCENT)
+                    .fg(theme::BADGE_FG)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(label, Style::default().fg(theme::MUTED)));
+        }
+        spans.push(Span::raw(" ")); // one-space gap between tabs
+    }
+
+    let width = spans.iter().map(|s| s.width()).sum::<usize>() as u16;
+    (spans, width)
+}
+
+/// The text of one tab pill, shared by the renderer and the hit-test so their
+/// widths can never disagree.
+fn tab_cell(i: usize, tab: &ActiveTab) -> String {
+    format!(" {} {} ", i + 1, tab.title())
+}
+
+/// Screen rect of each clickable tab. Mirrors the geometry in
+/// `render_status_bar`: the status bar is the first row and the tab strip is
+/// right-aligned within it. Labels don't depend on app state, so the area is
+/// all this needs.
+pub struct TabRects {
+    rects: Vec<(ActiveTab, Rect)>,
+}
+
+impl TabRects {
+    pub fn hit(&self, column: u16, row: u16) -> Option<ActiveTab> {
+        let pos = ratatui::layout::Position::new(column, row);
+        self.rects
+            .iter()
+            .find(|(_, r)| r.contains(pos))
+            .map(|(tab, _)| *tab)
+    }
+}
+
+pub fn tab_rects(area: Rect) -> TabRects {
+    let status = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .split(area)[0];
+
+    let widths: Vec<(ActiveTab, u16)> = ActiveTab::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, tab)| (*tab, tab_cell(i, tab).chars().count() as u16))
+        .collect();
+
+    // Each cell is followed by a one-space gap, matching `tab_strip`.
+    let total: u16 = widths.iter().map(|(_, w)| w + 1).sum();
+    let mut x = status.x + status.width.saturating_sub(total);
+
+    let rects = widths
+        .into_iter()
+        .map(|(tab, w)| {
+            let rect = Rect::new(x, status.y, w, 1);
+            x += w + 1;
+            (tab, rect)
+        })
+        .collect();
+
+    TabRects { rects }
+}
+
+fn tab_is_loading(app: &App) -> bool {
+    match app.active_tab {
+        ActiveTab::Jobs => app.is_loading,
+        ActiveTab::Nodes => app.nodes_loading,
+        ActiveTab::Partitions => app.partitions_loading,
+        ActiveTab::History => app.history_loading,
+    }
+}
+
 /// Layout of the dashboard's main content area. The single source of truth so
 /// rendering and mouse hit-testing can never drift apart.
 pub struct PanelRects {
@@ -109,7 +221,6 @@ pub struct PanelRects {
     pub right_header: Rect,
     pub details: Rect,
     pub logs: Rect,
-    pub summary: Rect,
 }
 
 impl PanelRects {
@@ -138,16 +249,14 @@ pub fn panel_rects(area: Rect) -> PanelRects {
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(cols[1]);
 
+    // Details takes what it needs for the job metadata; Logs gets the rest,
+    // which is the pane you actually read.
     let body = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40),
-            Constraint::Percentage(40),
-            Constraint::Percentage(20),
-        ])
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(right[1]);
 
     PanelRects {
@@ -155,14 +264,20 @@ pub fn panel_rects(area: Rect) -> PanelRects {
         right_header: right[0],
         details: body[0],
         logs: body[1],
-        summary: body[2],
     }
 }
 
-/// The selected job's name as a highlighted pill, centered above the right
-/// column. Pink so it reads as job identity, distinct from the purple focus
-/// borders.
+/// A header card at the top of the right column carrying the selected job's
+/// name as a highlighted pill. Boxed so it aligns with the Jobs panel's top
+/// edge and reads as a deliberate header rather than a shifted-down title.
 fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::DIM_BORDER));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
     let line = match app.get_selected_job() {
         Some(job) => Line::from(vec![
             Span::styled(
@@ -177,12 +292,29 @@ fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(theme::MUTED),
             ),
         ]),
-        None => Line::from(""),
+        None => Line::styled(
+            "no job selected",
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
     };
-    frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), inner);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    // The tabs sit right-aligned on this same line, inline with the title.
+    let (tabs, tab_width) = tab_strip(app);
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(tab_width)])
+        .split(area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(tabs)).alignment(Alignment::Right),
+        cols[1],
+    );
+
     if let Some(error) = &app.error_message {
         let line = Line::from(vec![
             Span::styled(
@@ -194,14 +326,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(theme::FAILED).add_modifier(Modifier::BOLD),
             ),
         ]);
-        frame.render_widget(Paragraph::new(line), area);
+        frame.render_widget(Paragraph::new(line), cols[0]);
         return;
     }
-
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(14)])
-        .split(area);
 
     let mut left = vec![Span::styled(
         " ❄ lazyslurm ",
@@ -211,7 +338,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     )];
 
-    let sep = || Span::styled("  ·  ", Style::default().fg(theme::DIM_BORDER));
+    let sep = || Span::raw("   ");
 
     if let Some(user) = &app.current_user {
         left.push(sep());
@@ -232,43 +359,59 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     ));
     left.push(Span::styled(" jobs", Style::default().fg(theme::MUTED)));
 
-    frame.render_widget(Paragraph::new(Line::from(left)), cols[0]);
-
-    if app.is_loading {
-        let right = Line::from(vec![
-            Span::styled(
-                theme::spinner_frame(app.tick),
-                Style::default().fg(theme::ACCENT),
-            ),
-            Span::styled(" refresh ", Style::default().fg(theme::MUTED)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(right).alignment(Alignment::Right),
-            cols[1],
-        );
+    // Refresh spinner sits just after the count so it never disturbs the
+    // right-aligned tabs when it pops in and out.
+    if tab_is_loading(app) {
+        left.push(sep());
+        left.push(Span::styled(
+            theme::spinner_frame(app.tick),
+            Style::default().fg(theme::ACCENT),
+        ));
     }
+
+    frame.render_widget(Paragraph::new(Line::from(left)), cols[0]);
 }
 
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
-    let title = format!("Jobs ({})", app.job_list.jobs.len());
+    let visible = app.visible_jobs();
+    let total = app.job_list.jobs.len();
+    let filtering = app.state == AppState::FilterInput || !app.filter_query.is_empty();
+
+    let title = if app.filter_query.is_empty() {
+        format!("Jobs ({total})")
+    } else {
+        format!("Jobs ({}/{total})", visible.len())
+    };
     let block = theme::panel(&title, app.focus == FocusPanel::Jobs);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // A filter line appears above the header only while a filter is in play.
+    let constraints: &[Constraint] = if filtering {
+        &[Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]
+    } else {
+        &[Constraint::Length(1), Constraint::Min(0)]
+    };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .constraints(constraints)
         .split(inner);
 
+    let (header_row, list_row) = if filtering {
+        frame.render_widget(Paragraph::new(filter_line(app)), rows[0]);
+        (rows[1], rows[2])
+    } else {
+        (rows[0], rows[1])
+    };
+
     let header = Line::from(Span::styled(
-        format!("  {:<7}{:<15}{:<8}STATE", "JOBID", "NAME", "TIME"),
+        // Four leading spaces: two for the selection rail, two for the pin mark.
+        format!("    {:<7}{:<15}{:<8}STATE", "JOBID", "NAME", "TIME"),
         Style::default().fg(theme::MUTED),
     ));
-    frame.render_widget(Paragraph::new(header), rows[0]);
+    frame.render_widget(Paragraph::new(header), header_row);
 
-    let jobs: Vec<ListItem> = app
-        .job_list
-        .jobs
+    let jobs: Vec<ListItem> = visible
         .iter()
         .enumerate()
         .map(|(i, job)| {
@@ -284,6 +427,11 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 Span::styled("  ", base)
             };
+            let pin = if app.is_pinned(job) {
+                Span::styled("★ ", base.fg(theme::ACCENT_PINK))
+            } else {
+                Span::styled("  ", base)
+            };
 
             let job_id = truncate(&job.display_id(), 6);
             let job_name = truncate(&job.name, 14);
@@ -291,6 +439,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 rail,
+                pin,
                 Span::styled(format!("{:<7}", job_id), base.fg(theme::FG)),
                 Span::styled(format!("{:<15}", job_name), base.fg(theme::FG)),
                 Span::styled(format!("{:<8}", time_used), base.fg(theme::MUTED)),
@@ -300,7 +449,43 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    frame.render_widget(List::new(jobs), rows[1]);
+    // Selection drives the ListState so a long, filtered list scrolls to keep
+    // the highlighted row visible.
+    let mut state = ratatui::widgets::ListState::default();
+    if !visible.is_empty() {
+        state.select(Some(app.selected_job_index.min(visible.len() - 1)));
+    }
+    frame.render_stateful_widget(List::new(jobs), list_row, &mut state);
+}
+
+/// The live filter line shown above the job list. While typing it carries a
+/// cursor; once applied it stays as a muted reminder with how to clear it.
+fn filter_line(app: &App) -> Line<'static> {
+    let typing = app.state == AppState::FilterInput;
+    let accent = if typing { theme::ACCENT } else { theme::MUTED };
+
+    let mut spans = vec![
+        Span::styled("/", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            app.filter_query.clone(),
+            Style::default().fg(if typing { theme::FG } else { theme::MUTED }),
+        ),
+    ];
+
+    if typing {
+        spans.push(Span::styled("▏", Style::default().fg(theme::ACCENT)));
+        spans.push(Span::styled(
+            "   enter to apply, esc to clear",
+            Style::default().fg(theme::DIM_BORDER),
+        ));
+    } else {
+        spans.push(Span::styled(
+            "   esc to clear",
+            Style::default().fg(theme::DIM_BORDER),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
@@ -375,43 +560,44 @@ fn render_placeholder(frame: &mut Frame, block: Block<'static>, area: Rect, mess
     );
 }
 
-fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
-    let running = app.running_jobs().len();
-    let pending = app.pending_jobs().len();
-    let completed = app.completed_jobs().len();
+fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let jobs_hints: &[(&str, &str)] = &[
+        ("q", "quit"),
+        ("⇥", "tab"),
+        ("↑↓", "nav"),
+        ("⏎", "view"),
+        ("/", "filter"),
+        ("P", "pin"),
+        ("r", "refresh"),
+        ("c", "cancel"),
+    ];
+    let cluster_hints: &[(&str, &str)] = &[
+        ("q", "quit"),
+        ("⇥", "tab"),
+        ("↑↓", "nav"),
+        ("r", "refresh"),
+        ("u", "user"),
+    ];
+    let history_hints: &[(&str, &str)] = &[
+        ("q", "quit"),
+        ("⇥", "tab"),
+        ("↑↓", "nav"),
+        ("⏎", "detail"),
+        ("r", "refresh"),
+        ("u", "user"),
+    ];
 
-    let chips = Line::from(vec![
-        count_chip(running, "running", theme::RUNNING),
-        Span::raw("  "),
-        count_chip(pending, "pending", theme::PENDING),
-        Span::raw("  "),
-        count_chip(completed, "done", theme::COMPLETED),
-    ]);
-
-    let bar = proportion_bar(running, pending, completed, 26);
-
-    let body = vec![Line::from(""), chips, Line::from(""), bar];
-    let info = Paragraph::new(body).block(theme::panel("Summary", false));
-    frame.render_widget(info, area);
-}
-
-fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
-    let pairs: &[(&str, &str)] = match app_state {
-        AppState::Normal => &[
-            ("q", "quit"),
-            ("←→", "focus"),
-            ("↑↓", "nav"),
-            ("⏎", "view"),
-            ("r", "refresh"),
-            ("c", "cancel"),
-            ("p", "partition"),
-            ("u", "user"),
-        ],
+    let pairs: &[(&str, &str)] = match app.state {
+        AppState::Normal if app.active_tab == ActiveTab::Jobs => jobs_hints,
+        AppState::Normal if app.active_tab == ActiveTab::History => history_hints,
+        AppState::Normal => cluster_hints,
         AppState::CancelJobPopup => &[("y", "confirm"), ("n", "reject"), ("esc", "reject")],
         AppState::PartitionSearchPopup | AppState::UserSearchPopup => {
             &[("esc", "close"), ("Enter", "submit")]
         }
         AppState::Fullscreen => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
+        AppState::HistoryDetail => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
+        AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
     };
 
     let help = Paragraph::new(hint_line(pairs)).block(
@@ -436,41 +622,11 @@ fn hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn count_chip(count: usize, label: &str, color: ratatui::style::Color) -> Span<'static> {
-    Span::styled(
-        format!("● {count} {label}"),
-        Style::default().fg(color),
-    )
-}
-
-/// Braille beads for the proportion bar. `FILL` is a dense, slightly-perforated
-/// glyph so filled segments read as a textured ribbon rather than a solid block;
-/// `TRACK` is a faint dotted midline for the empty remainder.
+/// Braille beads for the node/partition load bars. `FILL` is a dense,
+/// slightly-perforated glyph so filled segments read as a textured ribbon rather
+/// than a solid block; `TRACK` is a faint dotted midline for the empty remainder.
 const BAR_FILL: &str = "⠿";
 const BAR_TRACK: &str = "⠒";
-
-fn proportion_bar(running: usize, pending: usize, completed: usize, width: usize) -> Line<'static> {
-    let total = running + pending + completed;
-    if total == 0 {
-        return Line::from(Span::styled(
-            BAR_TRACK.repeat(width),
-            Style::default().fg(theme::DIM_BORDER),
-        ));
-    }
-
-    let cells = |n: usize| ((n as f32 / total as f32) * width as f32).round() as usize;
-    let r = cells(running);
-    let p = cells(pending);
-    let c = cells(completed);
-    let rest = width.saturating_sub(r + p + c);
-
-    Line::from(vec![
-        Span::styled(BAR_FILL.repeat(r), Style::default().fg(theme::RUNNING)),
-        Span::styled(BAR_FILL.repeat(p), Style::default().fg(theme::PENDING)),
-        Span::styled(BAR_FILL.repeat(c), Style::default().fg(theme::COMPLETED)),
-        Span::styled(BAR_TRACK.repeat(rest), Style::default().fg(theme::DIM_BORDER)),
-    ])
-}
 
 fn empty_state_lines(quote: crate::ui::quotes::Quote) -> Vec<Line<'static>> {
     let (text, author) = quote;
@@ -691,6 +847,447 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
         }
         LogRead::Missing(_) => {
             render_placeholder(frame, theme::panel("Logs", true), area, "No log output yet")
+        }
+    }
+}
+
+/// A titled panel with a column header and a selectable, scrolling list.
+/// `message` replaces the list when present, used for loading / error / empty.
+fn render_cluster_list(
+    frame: &mut Frame,
+    title: &str,
+    header: &str,
+    items: Vec<ListItem<'static>>,
+    selected: usize,
+    message: Option<&str>,
+    area: Rect,
+) {
+    let block = theme::panel(title, true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(msg) = message {
+        let body = vec![
+            Line::from(""),
+            Line::styled(
+                msg.to_string(),
+                Style::default()
+                    .fg(theme::MUTED)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+        ];
+        frame.render_widget(
+            Paragraph::new(body).alignment(Alignment::Center),
+            inner,
+        );
+        return;
+    }
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            header.to_string(),
+            Style::default().fg(theme::MUTED),
+        ))),
+        rows[0],
+    );
+
+    // A ListState carries the selection so the list scrolls to keep the
+    // highlighted row on screen; the row's own styling draws the highlight.
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(List::new(items), rows[1], &mut state);
+}
+
+/// Pick the loading / error / empty message for a cluster list, or `None` when
+/// there are rows to show.
+fn cluster_message<'a>(
+    loading: bool,
+    error: &'a Option<String>,
+    empty: bool,
+    empty_msg: &'a str,
+) -> Option<&'a str> {
+    if let Some(err) = error {
+        Some(err.as_str())
+    } else if empty && loading {
+        Some("Loading…")
+    } else if empty {
+        Some(empty_msg)
+    } else {
+        None
+    }
+}
+
+/// The leading selection rail plus the base row style, shared by every list.
+fn row_base(selected: bool) -> (Span<'static>, Style) {
+    let base = if selected {
+        Style::default().bg(theme::SELECT_BG)
+    } else {
+        Style::default()
+    };
+    let rail = if selected {
+        Span::styled("▌ ", Style::default().fg(theme::ACCENT))
+    } else {
+        Span::styled("  ", base)
+    };
+    (rail, base)
+}
+
+/// A short braille bar showing `filled` of `total` in `color`, padded out with
+/// the dim track. Mirrors the Summary panel's proportion bar at list scale.
+fn mini_bar(filled: usize, total: usize, width: usize, color: ratatui::style::Color) -> Vec<Span<'static>> {
+    let cells = if total == 0 {
+        0
+    } else {
+        ((filled as f32 / total as f32) * width as f32).round() as usize
+    }
+    .min(width);
+
+    vec![
+        Span::styled(BAR_FILL.repeat(cells), Style::default().fg(color)),
+        Span::styled(
+            BAR_TRACK.repeat(width - cells),
+            Style::default().fg(theme::DIM_BORDER),
+        ),
+    ]
+}
+
+/// Megabytes to a compact whole-GB string, e.g. `245G`. `None` becomes `-`.
+fn fmt_gb(mb: Option<u64>) -> String {
+    match mb {
+        Some(mb) => format!("{}G", mb / 1024),
+        None => "-".to_string(),
+    }
+}
+
+fn node_state_color(node: &Node) -> ratatui::style::Color {
+    if node.is_unavailable() {
+        return theme::FAILED;
+    }
+    let s = node.state.to_lowercase();
+    if s.contains("idle") {
+        theme::RUNNING
+    } else if s.contains("alloc") || s.contains("mix") {
+        theme::COMPLETED
+    } else {
+        theme::MUTED
+    }
+}
+
+fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let header = format!(
+        "  {:<18}{:<10}{:<14}{:<12}{:<20}PART",
+        "NODE", "STATE", "CPUS", "MEM f/t", "GPU"
+    );
+
+    let items: Vec<ListItem> = app
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| {
+            let (rail, base) = row_base(i == app.selected_node_index);
+            let color = node_state_color(node);
+
+            let mut spans = vec![
+                rail,
+                Span::styled(format!("{:<18}", truncate(&node.name, 17)), base.fg(theme::FG)),
+                Span::styled(format!("{:<10}", truncate(&node.state, 9)), base.fg(color)),
+            ];
+            spans.extend(mini_bar(
+                node.cpus_alloc as usize,
+                node.cpus_total as usize,
+                6,
+                color,
+            ));
+            spans.push(Span::styled(
+                format!(" {:<7}", format!("{}/{}", node.cpus_alloc, node.cpus_total)),
+                base.fg(theme::MUTED),
+            ));
+            spans.push(Span::styled(
+                format!("{:<12}", format!("{}/{}", fmt_gb(node.free_mem_mb), fmt_gb(node.memory_mb))),
+                base.fg(theme::MUTED),
+            ));
+            spans.push(Span::styled(
+                format!("{:<20}", truncate(node.gres.as_deref().unwrap_or("-"), 19)),
+                base.fg(theme::FG),
+            ));
+            spans.push(Span::styled(truncate(&node.partition, 12), base.fg(theme::MUTED)));
+
+            ListItem::new(Line::from(spans)).style(base)
+        })
+        .collect();
+
+    let title = format!("Nodes ({})", app.nodes.len());
+    let message = cluster_message(app.nodes_loading, &app.nodes_error, app.nodes.is_empty(), "No nodes reported");
+    render_cluster_list(frame, &title, &header, items, app.selected_node_index, message, area);
+}
+
+fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let header = format!(
+        "  {:<18}{:<8}{:<14}{:<10}TIMELIMIT",
+        "PARTITION", "AVAIL", "NODES", "i/t"
+    );
+
+    let items: Vec<ListItem> = app
+        .partitions
+        .iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let (rail, base) = row_base(i == app.selected_partition_index);
+            let up = part.is_up();
+            let name = if part.is_default {
+                format!("{}*", part.name)
+            } else {
+                part.name.clone()
+            };
+
+            let mut spans = vec![
+                rail,
+                Span::styled(format!("{:<18}", truncate(&name, 17)), base.fg(theme::FG)),
+                Span::styled(
+                    format!("{:<8}", part.availability),
+                    base.fg(if up { theme::RUNNING } else { theme::FAILED }),
+                ),
+            ];
+            spans.extend(mini_bar(
+                part.nodes_idle as usize,
+                part.nodes_total as usize,
+                6,
+                theme::RUNNING,
+            ));
+            spans.push(Span::styled(
+                format!(" {:<7}", format!("{}/{}", part.nodes_idle, part.nodes_total)),
+                base.fg(theme::MUTED),
+            ));
+            spans.push(Span::styled(
+                format!("{:<10}", ""),
+                base.fg(theme::MUTED),
+            ));
+            spans.push(Span::styled(part.time_limit.clone(), base.fg(theme::FG)));
+
+            ListItem::new(Line::from(spans)).style(base)
+        })
+        .collect();
+
+    let title = format!("Partitions ({})", app.partitions.len());
+    let message = cluster_message(
+        app.partitions_loading,
+        &app.partitions_error,
+        app.partitions.is_empty(),
+        "No partitions reported",
+    );
+    render_cluster_list(frame, &title, &header, items, app.selected_partition_index, message, area);
+}
+
+fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let header = format!(
+        "  {:<12}{:<18}{:<12}{:<8}{:<12}ENDED",
+        "JOBID", "NAME", "STATE", "EXIT", "ELAPSED"
+    );
+
+    let items: Vec<ListItem> = app
+        .history
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let (rail, base) = row_base(i == app.selected_history_index);
+            let color = history_color(entry);
+
+            ListItem::new(Line::from(vec![
+                rail,
+                Span::styled(format!("{:<12}", truncate(&entry.job_id, 11)), base.fg(theme::FG)),
+                Span::styled(format!("{:<18}", truncate(&entry.name, 17)), base.fg(theme::FG)),
+                Span::styled(format!("{:<12}", truncate(&entry.state, 11)), base.fg(color)),
+                Span::styled(format!("{:<8}", entry.exit_code.clone()), base.fg(theme::MUTED)),
+                Span::styled(format!("{:<12}", entry.elapsed.clone()), base.fg(theme::MUTED)),
+                Span::styled(truncate(&entry.end, 19), base.fg(theme::MUTED)),
+            ]))
+            .style(base)
+        })
+        .collect();
+
+    // sacct erroring almost always means slurmdbd accounting isn't set up;
+    // say so plainly rather than leaving an empty pane.
+    let message = if app.history_error.is_some() {
+        Some("Accounting not available (slurmdbd not configured)")
+    } else {
+        cluster_message(app.history_loading, &None, app.history.is_empty(), "No recent jobs")
+    };
+    let title = format!("History ({})", app.history.len());
+    render_cluster_list(frame, &title, &header, items, app.selected_history_index, message, area);
+}
+
+fn history_color(entry: &AcctEntry) -> ratatui::style::Color {
+    let s = entry.state.to_uppercase();
+    if s.starts_with("RUNNING") || s.starts_with("PENDING") {
+        theme::RUNNING
+    } else if entry.succeeded() {
+        theme::COMPLETED
+    } else {
+        theme::FAILED
+    }
+}
+
+fn acct_state_color(state: &str, exit_code: &str) -> ratatui::style::Color {
+    let s = state.to_uppercase();
+    if s.starts_with("RUNNING") || s.starts_with("PENDING") {
+        theme::RUNNING
+    } else if exit_code == "0:0" && s.starts_with("COMPLETED") {
+        theme::COMPLETED
+    } else {
+        theme::FAILED
+    }
+}
+
+/// The fullscreen detail for a finished job: rich sacct fields up top, a
+/// best-effort log tail below.
+fn render_history_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // header
+            Constraint::Length(17), // details
+            Constraint::Min(0),     // logs
+            Constraint::Length(1),  // hints
+        ])
+        .split(area);
+
+    frame.render_widget(Paragraph::new(history_detail_header(app)), rows[0]);
+
+    let details_block = theme::panel("Details", true);
+    match &app.history_detail {
+        Some(detail) => {
+            let body = acct_detail_lines(detail);
+            let offset = clamp_scroll(0, body.len(), details_block.inner(rows[1]).height);
+            frame.render_widget(
+                Paragraph::new(body)
+                    .block(details_block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((offset, 0)),
+                rows[1],
+            );
+            render_history_detail_logs(frame, app, detail, rows[2]);
+        }
+        None => {
+            let msg = app
+                .history_detail_error
+                .as_deref()
+                .unwrap_or("Loading job detail…");
+            render_placeholder(frame, details_block, rows[1], msg);
+            frame.render_widget(theme::panel("Logs", true), rows[2]);
+        }
+    }
+
+    let hints: &[(&str, &str)] = &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")];
+    frame.render_widget(Paragraph::new(hint_line(hints)), rows[3]);
+}
+
+fn history_detail_header(app: &App) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        " History ",
+        Style::default()
+            .bg(theme::ACCENT)
+            .fg(theme::BADGE_FG)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    let id = app
+        .history_detail
+        .as_ref()
+        .map(|d| d.job_id.clone())
+        .or_else(|| app.history_detail_id.clone())
+        .unwrap_or_default();
+
+    if let Some(detail) = &app.history_detail {
+        spans.push(Span::styled(
+            format!("  {}  ", detail.name),
+            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans.push(Span::styled(
+        format!("job {id}"),
+        Style::default().fg(theme::MUTED),
+    ));
+
+    if app.history_detail_loading {
+        spans.push(Span::styled(
+            format!("   {} ", theme::spinner_frame(app.tick)),
+            Style::default().fg(theme::ACCENT),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+fn acct_detail_lines(d: &AcctDetail) -> Vec<Line<'static>> {
+    let badge = Span::styled(
+        format!(" ● {} ", d.state),
+        Style::default()
+            .bg(acct_state_color(&d.state, &d.exit_code))
+            .fg(theme::BADGE_FG)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let used = d.max_rss.as_deref().unwrap_or("--");
+    let req = if d.req_mem.is_empty() { "--" } else { &d.req_mem };
+
+    let mut lines = vec![Line::from(badge), Line::from("")];
+    lines.push(kv("User", d.user.clone()));
+    if !d.account.is_empty() {
+        lines.push(kv("Account", d.account.clone()));
+    }
+    lines.push(kv("Partition", d.partition.clone()));
+    if !d.node_list.is_empty() {
+        lines.push(kv("Nodes", d.node_list.clone()));
+    }
+    lines.push(kv("CPUs", d.alloc_cpus.clone()));
+    lines.push(kv("Memory", format!("req {req}   used {used}")));
+    if !d.total_cpu.is_empty() {
+        lines.push(kv("CPU time", d.total_cpu.clone()));
+    }
+    lines.push(kv("Submitted", d.submit.clone()));
+    lines.push(kv("Started", d.start.clone()));
+    lines.push(kv("Ended", d.end.clone()));
+    lines.push(kv("Elapsed", d.elapsed.clone()));
+    lines.push(kv("Exit code", d.exit_code.clone()));
+    if !d.work_dir.is_empty() {
+        lines.push(kv("Work dir", d.work_dir.clone()));
+    }
+
+    lines
+}
+
+fn render_history_detail_logs(frame: &mut Frame, app: &App, detail: &AcctDetail, area: Rect) {
+    let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.job_id);
+    let block = theme::panel("Logs", true);
+
+    match read_tail_for_paths(paths, TAIL_BYTES) {
+        LogRead::Lines { path, text } => {
+            let content = format!("{path}\n{}\n{text}", "─".repeat(40));
+            let total = content.lines().count();
+            let offset = clamp_scroll(
+                app.history_detail_scroll,
+                total,
+                block.inner(area).height,
+            );
+            frame.render_widget(
+                Paragraph::new(content)
+                    .style(Style::default().fg(theme::FG))
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((offset, 0)),
+                area,
+            );
+        }
+        LogRead::Empty(_) => render_placeholder(frame, block, area, "This job's log is empty"),
+        // For a finished job, "not found" usually means custom --output naming
+        // or the file was cleaned up, so be explicit about it being best-effort.
+        LogRead::Missing(_) => {
+            render_placeholder(frame, block, area, "No log file found for this job")
         }
     }
 }

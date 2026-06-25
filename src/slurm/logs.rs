@@ -50,8 +50,13 @@ pub fn tail_file(path: &str, max_bytes: u64) -> Option<String> {
 
 /// Resolve a job's candidate log paths and tail the first one that reads.
 pub fn read_tail_for_job(job: &Job, max_bytes: u64) -> LogRead {
-    let paths = SlurmParser::get_job_log_paths(job);
+    read_tail_for_paths(SlurmParser::get_job_log_paths(job), max_bytes)
+}
 
+/// Tail the first of `paths` that reads. Shared by the live Jobs view and the
+/// History detail view, which reconstructs its paths from sacct's WorkDir since
+/// a finished job no longer has a `scontrol` StdOut to point at.
+pub fn read_tail_for_paths(paths: Vec<String>, max_bytes: u64) -> LogRead {
     for path in &paths {
         match tail_file(path, max_bytes) {
             Some(text) if text.is_empty() => return LogRead::Empty(path.clone()),
