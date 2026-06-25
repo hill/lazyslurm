@@ -20,7 +20,18 @@ pub enum AppState {
     PartitionSearchPopup,
     UserSearchPopup,
     CancelJobPopup,
+    Fullscreen,
 }
+
+/// Which dashboard panel currently holds keyboard focus. Drives the accent
+/// glow and what Up/Down act on. Summary is not focusable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FocusPanel {
+    Jobs,
+    Details,
+    Logs,
+}
+
 
 pub struct App {
     pub job_list: JobList,
@@ -48,6 +59,21 @@ pub struct App {
     pub tick: u64,
     /// Quote shown on the empty-state panel, picked once per session.
     pub quote: crate::ui::quotes::Quote,
+    /// Panel holding keyboard focus on the dashboard.
+    pub focus: FocusPanel,
+    /// Scroll offsets for the inline Details and Logs panels.
+    pub details_scroll: u16,
+    pub logs_scroll: u16,
+    /// Job snapshotted when a pane is fullscreened, so a background refresh
+    /// can't swap content out from under the view. Unused by the Jobs pane,
+    /// which renders the live list.
+    pub fullscreen_job: Option<Job>,
+    /// Which pane is zoomed while `state == Fullscreen`.
+    pub fullscreen_panel: FocusPanel,
+    /// Scroll offset for the fullscreen Details and Logs views.
+    pub fullscreen_scroll: u16,
+    /// Whether the fullscreen Logs view auto-scrolls to the newest line.
+    pub log_follow: bool,
 }
 
 impl App {
@@ -77,6 +103,13 @@ impl App {
             refresh_generation: 0,
             tick: 0,
             quote: crate::ui::quotes::pick(),
+            focus: FocusPanel::Jobs,
+            details_scroll: 0,
+            logs_scroll: 0,
+            fullscreen_job: None,
+            fullscreen_panel: FocusPanel::Jobs,
+            fullscreen_scroll: 0,
+            log_follow: true,
         }
     }
 
@@ -206,6 +239,82 @@ impl App {
 
     fn update_selected_job(&mut self) {
         self.selected_job = self.job_list.jobs.get(self.selected_job_index).cloned();
+        // A different job is now selected, so its inline panels start at the top.
+        self.details_scroll = 0;
+        self.logs_scroll = 0;
+    }
+
+    /// Left/Right move between the two columns. The left column is just the
+    /// Jobs list; the right column is the Details/Logs stack.
+    pub fn focus_left(&mut self) {
+        self.focus = FocusPanel::Jobs;
+    }
+
+    pub fn focus_right(&mut self) {
+        if self.focus == FocusPanel::Jobs {
+            self.focus = FocusPanel::Details;
+        }
+    }
+
+    /// Up/Down move between the stacked panes on the right.
+    pub fn focus_up(&mut self) {
+        if self.focus == FocusPanel::Logs {
+            self.focus = FocusPanel::Details;
+        }
+    }
+
+    pub fn focus_down(&mut self) {
+        if self.focus == FocusPanel::Details {
+            self.focus = FocusPanel::Logs;
+        }
+    }
+
+    pub fn scroll_focused_down(&mut self, lines: u16) {
+        match self.focus {
+            FocusPanel::Details => self.details_scroll = self.details_scroll.saturating_add(lines),
+            FocusPanel::Logs => self.logs_scroll = self.logs_scroll.saturating_add(lines),
+            FocusPanel::Jobs => {}
+        }
+    }
+
+    pub fn scroll_focused_up(&mut self, lines: u16) {
+        match self.focus {
+            FocusPanel::Details => self.details_scroll = self.details_scroll.saturating_sub(lines),
+            FocusPanel::Logs => self.logs_scroll = self.logs_scroll.saturating_sub(lines),
+            FocusPanel::Jobs => {}
+        }
+    }
+
+    /// Zoom the focused pane to fullscreen. Snapshots the selected job so a
+    /// refresh can't swap content out from under Details/Logs.
+    pub fn open_fullscreen(&mut self) {
+        if self.selected_job.is_some() {
+            self.fullscreen_job = self.selected_job.clone();
+            self.fullscreen_panel = self.focus;
+            self.fullscreen_scroll = 0;
+            self.log_follow = true;
+            self.state = AppState::Fullscreen;
+        }
+    }
+
+    pub fn close_fullscreen(&mut self) {
+        self.fullscreen_job = None;
+        self.state = AppState::Normal;
+    }
+
+    /// Scrolling away from the bottom pauses the live tail (Logs only).
+    pub fn fullscreen_scroll_up(&mut self, lines: u16) {
+        self.log_follow = false;
+        self.fullscreen_scroll = self.fullscreen_scroll.saturating_sub(lines);
+    }
+
+    pub fn fullscreen_scroll_down(&mut self, lines: u16) {
+        self.log_follow = false;
+        self.fullscreen_scroll = self.fullscreen_scroll.saturating_add(lines);
+    }
+
+    pub fn fullscreen_follow(&mut self) {
+        self.log_follow = true;
     }
 
     /// Re-resolve the selection after the job list changes. Follows the
@@ -266,5 +375,42 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focus_moves_spatially_between_panels() {
+        let mut app = App::new();
+        assert_eq!(app.focus, FocusPanel::Jobs);
+
+        app.focus_left();
+        assert_eq!(app.focus, FocusPanel::Jobs, "left edge stays on Jobs");
+
+        app.focus_right();
+        assert_eq!(app.focus, FocusPanel::Details);
+        app.focus_down();
+        assert_eq!(app.focus, FocusPanel::Logs);
+        app.focus_down();
+        assert_eq!(app.focus, FocusPanel::Logs, "nothing focusable below Logs");
+        app.focus_up();
+        assert_eq!(app.focus, FocusPanel::Details);
+        app.focus_left();
+        assert_eq!(app.focus, FocusPanel::Jobs);
+    }
+
+    #[test]
+    fn scrolling_a_panel_only_moves_its_own_offset() {
+        let mut app = App::new();
+        app.focus = FocusPanel::Logs;
+        app.scroll_focused_down(1);
+        app.scroll_focused_down(1);
+        assert_eq!(app.logs_scroll, 2);
+        assert_eq!(app.details_scroll, 0);
+        app.scroll_focused_up(1);
+        assert_eq!(app.logs_scroll, 1);
     }
 }

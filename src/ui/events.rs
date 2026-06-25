@@ -1,6 +1,9 @@
-use crate::app::{App, AppState};
-use crate::render_app;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::app::{App, AppState, FocusPanel};
+use crate::{panel_rects, render_app};
+use ratatui::crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     error::Error,
@@ -14,6 +17,7 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::UserSearchPopup => event_user_search_popup(app, key).await,
         AppState::CancelJobPopup => event_cancel_popup(app, key).await,
         AppState::PartitionSearchPopup => event_partition_search_popup(app, key).await,
+        AppState::Fullscreen => event_fullscreen(app, key),
     }
 }
 
@@ -48,6 +52,7 @@ pub fn reset_popup_state_to_normal(app: &mut App) {
 }
 
 async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    const PAGE: u16 = 10;
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), _)
         | (KeyCode::Char('Q'), _)
@@ -57,11 +62,31 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('r'), _) => {
             app.start_refresh();
         }
+        (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
+            app.focus_left();
+        }
+        (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
+            app.focus_right();
+        }
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-            app.select_previous_job();
+            if app.focus == FocusPanel::Jobs {
+                app.select_previous_job();
+            } else {
+                app.focus_up();
+            }
         }
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-            app.select_next_job();
+            if app.focus == FocusPanel::Jobs {
+                app.select_next_job();
+            } else {
+                app.focus_down();
+            }
+        }
+        // Inline scroll for the right-hand panes; arrows are reserved for focus.
+        (KeyCode::PageUp, _) => app.scroll_focused_up(PAGE),
+        (KeyCode::PageDown, _) => app.scroll_focused_down(PAGE),
+        (KeyCode::Enter, _) => {
+            app.open_fullscreen();
         }
         (KeyCode::Char('u'), _) => {
             app.state = AppState::UserSearchPopup;
@@ -72,6 +97,27 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('c'), _) => {
             app.open_cancel_popup();
         }
+        _ => {}
+    }
+    Ok(None)
+}
+
+fn event_fullscreen(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    const PAGE: u16 = 10;
+    let on_jobs = app.fullscreen_panel == FocusPanel::Jobs;
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) | (KeyCode::Char('Q'), _) => {
+            app.close_fullscreen();
+        }
+        // On the Jobs pane the arrows move the selection; elsewhere they scroll.
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) if on_jobs => app.select_previous_job(),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) if on_jobs => app.select_next_job(),
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.fullscreen_scroll_up(1),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.fullscreen_scroll_down(1),
+        (KeyCode::PageUp, _) => app.fullscreen_scroll_up(PAGE),
+        (KeyCode::PageDown, _) => app.fullscreen_scroll_down(PAGE),
+        (KeyCode::Char('G'), _) | (KeyCode::Char('g'), _) => app.fullscreen_follow(),
         _ => {}
     }
     Ok(None)
@@ -128,11 +174,19 @@ pub async fn run_event_loop(
             .checked_sub(last_tick.elapsed())
             .unwrap_or(Duration::from_secs(0));
 
-        if event::poll(timeout)?
-            && let Event::Key(key) = event::read()?
-            && let Ok(Some(())) = handle_key_event(app, key).await
-        {
-            return Ok(());
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Ok(Some(())) = handle_key_event(app, key).await {
+                        return Ok(());
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    let size = terminal.size()?;
+                    handle_mouse_event(app, mouse, Rect::new(0, 0, size.width, size.height));
+                }
+                _ => {}
+            }
         }
 
         if app.should_refresh() {
@@ -143,5 +197,36 @@ pub async fn run_event_loop(
             last_tick = Instant::now();
             app.tick = app.tick.wrapping_add(1);
         }
+    }
+}
+
+/// Click a panel to focus it, wheel to scroll the focused panel. Only acts on
+/// the dashboard, where the panels are laid out. Reuses `panel_rects` so the
+/// hit-testing can't drift from what's drawn.
+fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
+    if app.state != AppState::Normal {
+        return;
+    }
+
+    let main = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // status bar
+            Constraint::Min(0),    // panels
+            Constraint::Length(3), // help bar
+        ])
+        .split(area)[1];
+
+    match mouse.kind {
+        MouseEventKind::Down(_) => {
+            if let Some(panel) = panel_rects(main).hit(mouse.column, mouse.row) {
+                app.focus = panel;
+            }
+        }
+        MouseEventKind::ScrollDown if app.focus == FocusPanel::Jobs => app.select_next_job(),
+        MouseEventKind::ScrollUp if app.focus == FocusPanel::Jobs => app.select_previous_job(),
+        MouseEventKind::ScrollDown => app.scroll_focused_down(1),
+        MouseEventKind::ScrollUp => app.scroll_focused_up(1),
+        _ => {}
     }
 }

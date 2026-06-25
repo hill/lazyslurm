@@ -5,11 +5,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
-use std::fs;
-
-use crate::slurm::SlurmParser;
+use crate::slurm::logs::{LogRead, TAIL_BYTES, read_tail_for_job};
 use crate::ui::theme;
-use crate::ui::App;
+use crate::ui::{App, FocusPanel};
 use crate::{AppState, models::Job};
 
 fn render_text_popup(title: &str, app: &App, frame: &mut Frame) {
@@ -39,6 +37,11 @@ fn popup_block(title: &str) -> Block<'static> {
 }
 
 pub fn render_app(frame: &mut Frame, app: &App) {
+    if app.state == AppState::Fullscreen {
+        render_fullscreen(frame, app, frame.area());
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -50,28 +53,12 @@ pub fn render_app(frame: &mut Frame, app: &App) {
 
     render_status_bar(frame, app, chunks[0]);
 
-    let main_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(40), // Jobs list
-            Constraint::Percentage(60), // Details/logs
-        ])
-        .split(chunks[1]);
-
-    render_jobs_list(frame, app, main_chunks[0]);
-
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40), // Job details
-            Constraint::Percentage(40), // Job logs
-            Constraint::Percentage(20), // Quick info/summary
-        ])
-        .split(main_chunks[1]);
-
-    render_job_details(frame, app, right_chunks[0]);
-    render_job_logs(frame, app, right_chunks[1]);
-    render_quick_info(frame, app, right_chunks[2]);
+    let rects = panel_rects(chunks[1]);
+    render_jobs_list(frame, app, rects.jobs);
+    render_right_header(frame, app, rects.right_header);
+    render_job_details(frame, app, rects.details);
+    render_job_logs(frame, app, rects.logs);
+    render_quick_info(frame, app, rects.summary);
 
     render_help_bar(app.state, frame, chunks[2]);
 
@@ -113,6 +100,86 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         }
         _ => {}
     }
+}
+
+/// Layout of the dashboard's main content area. The single source of truth so
+/// rendering and mouse hit-testing can never drift apart.
+pub struct PanelRects {
+    pub jobs: Rect,
+    pub right_header: Rect,
+    pub details: Rect,
+    pub logs: Rect,
+    pub summary: Rect,
+}
+
+impl PanelRects {
+    /// The focusable panel sitting under a point, if any.
+    pub fn hit(&self, column: u16, row: u16) -> Option<FocusPanel> {
+        let pos = ratatui::layout::Position::new(column, row);
+        if self.jobs.contains(pos) {
+            Some(FocusPanel::Jobs)
+        } else if self.details.contains(pos) {
+            Some(FocusPanel::Details)
+        } else if self.logs.contains(pos) {
+            Some(FocusPanel::Logs)
+        } else {
+            None
+        }
+    }
+}
+
+/// Split the main area into the panels. Used by `render_app` to draw and by the
+/// mouse handler to map a click back to a panel.
+pub fn panel_rects(area: Rect) -> PanelRects {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(cols[1]);
+
+    let body = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(40),
+            Constraint::Percentage(20),
+        ])
+        .split(right[1]);
+
+    PanelRects {
+        jobs: cols[0],
+        right_header: right[0],
+        details: body[0],
+        logs: body[1],
+        summary: body[2],
+    }
+}
+
+/// The selected job's name as a highlighted pill, centered above the right
+/// column. Pink so it reads as job identity, distinct from the purple focus
+/// borders.
+fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
+    let line = match app.get_selected_job() {
+        Some(job) => Line::from(vec![
+            Span::styled(
+                format!(" {} ", job.name),
+                Style::default()
+                    .bg(theme::ACCENT_PINK)
+                    .fg(theme::BADGE_FG)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  job {}", job.display_id()),
+                Style::default().fg(theme::MUTED),
+            ),
+        ]),
+        None => Line::from(""),
+    };
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -184,7 +251,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!("Jobs ({})", app.job_list.jobs.len());
-    let block = theme::panel(&title, true);
+    let block = theme::panel(&title, app.focus == FocusPanel::Jobs);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -237,7 +304,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
-    let block = theme::panel("Details", false);
+    let block = theme::panel("Details", app.focus == FocusPanel::Details);
 
     let body = if let Some(job) = app.get_selected_job() {
         job_detail_lines(job)
@@ -250,23 +317,62 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
         )]
     };
 
-    let details = Paragraph::new(body).block(block).wrap(Wrap { trim: false });
+    let offset = clamp_scroll(app.details_scroll, body.len(), block.inner(area).height);
+    let details = Paragraph::new(body)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((offset, 0));
     frame.render_widget(details, area);
 }
 
 fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
-    let content = if let Some(job) = app.get_selected_job() {
-        read_job_logs(job)
-    } else {
-        "Select a job to view logs".to_string()
-    };
+    let block = theme::panel("Logs", app.focus == FocusPanel::Logs);
 
-    let logs = Paragraph::new(content)
-        .style(Style::default().fg(theme::FG))
-        .block(theme::panel("Logs", false))
-        .wrap(Wrap { trim: true });
+    match app.get_selected_job().map(|job| read_tail_for_job(job, TAIL_BYTES)) {
+        Some(LogRead::Lines { path, text }) => {
+            let content = format!("{path}\n{}\n{text}", "─".repeat(40));
+            let line_count = content.lines().count();
+            let offset = clamp_scroll(app.logs_scroll, line_count, block.inner(area).height);
+            frame.render_widget(
+                Paragraph::new(content)
+                    .style(Style::default().fg(theme::FG))
+                    .block(block)
+                    .wrap(Wrap { trim: true })
+                    .scroll((offset, 0)),
+                area,
+            );
+        }
+        Some(LogRead::Empty(_)) => render_placeholder(frame, block, area, "This job's log is empty"),
+        Some(LogRead::Missing(_)) => render_placeholder(frame, block, area, "No log output yet"),
+        None => render_placeholder(frame, block, area, "Select a job to view logs"),
+    }
+}
 
-    frame.render_widget(logs, area);
+/// Clamp a stored scroll offset to the last useful line given the viewport
+/// height, so over-scrolling past the end of the text is a no-op.
+fn clamp_scroll(offset: u16, total_lines: usize, viewport: u16) -> u16 {
+    let max = (total_lines as u16).saturating_sub(viewport);
+    offset.min(max)
+}
+
+/// A non-log message in the Logs panel, styled so it doesn't read as log
+/// output: centered and muted italic.
+fn render_placeholder(frame: &mut Frame, block: Block<'static>, area: Rect, message: &str) {
+    let body = vec![
+        Line::from(""),
+        Line::styled(
+            message.to_string(),
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
+    ];
+    frame.render_widget(
+        Paragraph::new(body)
+            .block(block)
+            .alignment(Alignment::Center),
+        area,
+    );
 }
 
 fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
@@ -293,7 +399,9 @@ fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
     let pairs: &[(&str, &str)] = match app_state {
         AppState::Normal => &[
             ("q", "quit"),
+            ("←→", "focus"),
             ("↑↓", "nav"),
+            ("⏎", "view"),
             ("r", "refresh"),
             ("c", "cancel"),
             ("p", "partition"),
@@ -303,17 +411,10 @@ fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
         AppState::PartitionSearchPopup | AppState::UserSearchPopup => {
             &[("esc", "close"), ("Enter", "submit")]
         }
+        AppState::Fullscreen => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
     };
 
-    let mut spans = Vec::new();
-    for (i, (key, label)) in pairs.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled("   ", Style::default().fg(theme::DIM_BORDER)));
-        }
-        spans.extend(theme::key_hint(key, label));
-    }
-
-    let help = Paragraph::new(Line::from(spans)).block(
+    let help = Paragraph::new(hint_line(pairs)).block(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -323,6 +424,18 @@ fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
     frame.render_widget(help, area);
 }
 
+/// A row of `key label` hints, keys in accent and labels muted.
+fn hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (i, (key, label)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("   ", Style::default().fg(theme::DIM_BORDER)));
+        }
+        spans.extend(theme::key_hint(key, label));
+    }
+    Line::from(spans)
+}
+
 fn count_chip(count: usize, label: &str, color: ratatui::style::Color) -> Span<'static> {
     Span::styled(
         format!("● {count} {label}"),
@@ -330,11 +443,17 @@ fn count_chip(count: usize, label: &str, color: ratatui::style::Color) -> Span<'
     )
 }
 
+/// Braille beads for the proportion bar. `FILL` is a dense, slightly-perforated
+/// glyph so filled segments read as a textured ribbon rather than a solid block;
+/// `TRACK` is a faint dotted midline for the empty remainder.
+const BAR_FILL: &str = "⠿";
+const BAR_TRACK: &str = "⠒";
+
 fn proportion_bar(running: usize, pending: usize, completed: usize, width: usize) -> Line<'static> {
     let total = running + pending + completed;
     if total == 0 {
         return Line::from(Span::styled(
-            "░".repeat(width),
+            BAR_TRACK.repeat(width),
             Style::default().fg(theme::DIM_BORDER),
         ));
     }
@@ -346,10 +465,10 @@ fn proportion_bar(running: usize, pending: usize, completed: usize, width: usize
     let rest = width.saturating_sub(r + p + c);
 
     Line::from(vec![
-        Span::styled("█".repeat(r), Style::default().fg(theme::RUNNING)),
-        Span::styled("█".repeat(p), Style::default().fg(theme::PENDING)),
-        Span::styled("█".repeat(c), Style::default().fg(theme::COMPLETED)),
-        Span::styled("░".repeat(rest), Style::default().fg(theme::DIM_BORDER)),
+        Span::styled(BAR_FILL.repeat(r), Style::default().fg(theme::RUNNING)),
+        Span::styled(BAR_FILL.repeat(p), Style::default().fg(theme::PENDING)),
+        Span::styled(BAR_FILL.repeat(c), Style::default().fg(theme::COMPLETED)),
+        Span::styled(BAR_TRACK.repeat(rest), Style::default().fg(theme::DIM_BORDER)),
     ])
 }
 
@@ -399,13 +518,6 @@ fn kv(key: &str, value: String) -> Line<'static> {
 
 fn job_detail_lines(job: &Job) -> Vec<Line<'static>> {
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!("{} ", job.display_id()),
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(job.name.clone(), Style::default().fg(theme::MUTED)),
-        ]),
         Line::from(theme::state_badge(&job.state)),
         Line::from(""),
         kv("User", job.user.clone()),
@@ -452,35 +564,134 @@ fn job_detail_lines(job: &Job) -> Vec<Line<'static>> {
     lines
 }
 
-fn read_job_logs(job: &Job) -> String {
-    let log_paths = SlurmParser::get_job_log_paths(job);
+/// The focused pane, zoomed to the whole screen with a header and key hints.
+fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // header
+            Constraint::Min(0),    // body
+            Constraint::Length(1), // key hints
+        ])
+        .split(area);
 
-    // Try each potential log path
-    for path in &log_paths {
-        if let Ok(content) = fs::read_to_string(path) {
-            if content.is_empty() {
-                return format!("Log file exists but is empty: {}", path);
-            }
+    let hints: &[(&str, &str)] = match app.fullscreen_panel {
+        FocusPanel::Jobs => &[("esc", "back"), ("↑↓", "select"), ("q", "quit")],
+        FocusPanel::Details => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
+        FocusPanel::Logs => &[("esc", "back"), ("↑↓", "scroll"), ("G", "follow"), ("q", "quit")],
+    };
 
-            // Show last 20 lines (tail-like behavior)
-            let lines: Vec<&str> = content.lines().collect();
-            let start = lines.len().saturating_sub(20);
-            let tail_lines = &lines[start..];
+    frame.render_widget(Paragraph::new(fullscreen_header(app)), rows[0]);
 
-            return format!(
-                "Log file: {}\n{}\n{}",
-                path,
-                "-".repeat(50),
-                tail_lines.join("\n")
-            );
+    match app.fullscreen_panel {
+        FocusPanel::Jobs => render_jobs_list(frame, app, rows[1]),
+        FocusPanel::Details => render_fullscreen_details(frame, app, rows[1]),
+        FocusPanel::Logs => render_fullscreen_logs(frame, app, rows[1]),
+    }
+
+    frame.render_widget(Paragraph::new(hint_line(hints)), rows[2]);
+}
+
+fn fullscreen_header(app: &App) -> Line<'static> {
+    let title = match app.fullscreen_panel {
+        FocusPanel::Jobs => "Jobs",
+        FocusPanel::Details => "Details",
+        FocusPanel::Logs => "Logs",
+    };
+
+    let mut spans = vec![Span::styled(
+        format!(" {title} "),
+        Style::default()
+            .bg(theme::ACCENT)
+            .fg(theme::BADGE_FG)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    if let Some(job) = &app.fullscreen_job {
+        spans.push(Span::styled(
+            format!("  {}  ", job.name),
+            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("job {}", job.display_id()),
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+
+    if app.fullscreen_panel == FocusPanel::Logs {
+        if app.log_follow {
+            spans.push(Span::styled(
+                format!("   {} ", theme::spinner_frame(app.tick)),
+                Style::default().fg(theme::ACCENT),
+            ));
+            spans.push(Span::styled(
+                "[FOLLOWING]",
+                Style::default()
+                    .fg(theme::RUNNING)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                "    [PAUSED]",
+                Style::default()
+                    .fg(theme::PENDING)
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
     }
 
-    // No logs found
-    if log_paths.is_empty() {
-        "No log file paths available".to_string()
-    } else {
-        format!("No logs found. Checked paths:\n{}", log_paths.join("\n"))
+    Line::from(spans)
+}
+
+fn render_fullscreen_details(frame: &mut Frame, app: &App, area: Rect) {
+    let block = theme::panel("Details", true);
+    let body = match &app.fullscreen_job {
+        Some(job) => job_detail_lines(job),
+        None => vec![Line::styled(
+            "No job selected",
+            Style::default().fg(theme::MUTED),
+        )],
+    };
+    let offset = clamp_scroll(app.fullscreen_scroll, body.len(), block.inner(area).height);
+    frame.render_widget(
+        Paragraph::new(body)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((offset, 0)),
+        area,
+    );
+}
+
+fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(job) = app.fullscreen_job.as_ref() else {
+        return;
+    };
+
+    match read_tail_for_job(job, TAIL_BYTES) {
+        LogRead::Lines { path, text } => {
+            let block = theme::panel(&format!("Logs · {path}"), true);
+            let viewport = block.inner(area).height;
+            let total = text.lines().count();
+            let offset = if app.log_follow {
+                (total as u16).saturating_sub(viewport)
+            } else {
+                clamp_scroll(app.fullscreen_scroll, total, viewport)
+            };
+            frame.render_widget(
+                Paragraph::new(text)
+                    .style(Style::default().fg(theme::FG))
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((offset, 0)),
+                area,
+            );
+        }
+        LogRead::Empty(_) => {
+            render_placeholder(frame, theme::panel("Logs", true), area, "This job's log is empty")
+        }
+        LogRead::Missing(_) => {
+            render_placeholder(frame, theme::panel("Logs", true), area, "No log output yet")
+        }
     }
 }
 
