@@ -51,6 +51,11 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         return;
     }
 
+    if app.state == AppState::LogCopy {
+        render_log_copy(frame, app, frame.area());
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -598,6 +603,7 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         AppState::Fullscreen => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
         AppState::HistoryDetail => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
         AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
+        AppState::LogCopy => &[("select", "copy"), ("↑↓", "scroll"), ("esc", "exit")],
     };
 
     let help = Paragraph::new(hint_line(pairs)).block(
@@ -734,7 +740,13 @@ fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
     let hints: &[(&str, &str)] = match app.fullscreen_panel {
         FocusPanel::Jobs => &[("esc", "back"), ("↑↓", "select"), ("q", "quit")],
         FocusPanel::Details => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
-        FocusPanel::Logs => &[("esc", "back"), ("↑↓", "scroll"), ("G", "follow"), ("q", "quit")],
+        FocusPanel::Logs => &[
+            ("esc", "back"),
+            ("↑↓", "scroll"),
+            ("G", "follow"),
+            ("y", "copy"),
+            ("q", "quit"),
+        ],
     };
 
     frame.render_widget(Paragraph::new(fullscreen_header(app)), rows[0]);
@@ -847,6 +859,62 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
         }
         LogRead::Missing(_) => {
             render_placeholder(frame, theme::panel("Logs", true), area, "No log output yet")
+        }
+    }
+}
+
+/// Plain, borderless log view for copying. Mouse capture is off while this is
+/// shown (see `run_event_loop`), so the terminal's own selection works. No
+/// border, no wrap: each screen row is exactly one log line, which keeps a
+/// drag-selection clean and free of injected line breaks.
+fn render_log_copy(frame: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    let Some(job) = app.fullscreen_job.as_ref() else {
+        return;
+    };
+
+    let mut header = vec![Span::styled(
+        " COPY ",
+        Style::default()
+            .bg(theme::ACCENT_PINK)
+            .fg(theme::BADGE_FG)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    match read_tail_for_job(job, TAIL_BYTES) {
+        LogRead::Lines { path, text } => {
+            header.push(Span::styled(format!("  {path}"), Style::default().fg(theme::MUTED)));
+            header.push(Span::styled(
+                "   select text to copy, esc to exit",
+                Style::default().fg(theme::DIM_BORDER),
+            ));
+            frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
+
+            let viewport = rows[1].height;
+            let total = text.lines().count();
+            let offset = if app.log_follow {
+                (total as u16).saturating_sub(viewport)
+            } else {
+                clamp_scroll(app.fullscreen_scroll, total, viewport)
+            };
+            frame.render_widget(
+                Paragraph::new(text)
+                    .style(Style::default().fg(theme::FG))
+                    .scroll((offset, 0)),
+                rows[1],
+            );
+        }
+        LogRead::Empty(_) => {
+            frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
+            render_placeholder(frame, theme::panel("Logs", true), rows[1], "This job's log is empty");
+        }
+        LogRead::Missing(_) => {
+            frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
+            render_placeholder(frame, theme::panel("Logs", true), rows[1], "No log output yet");
         }
     }
 }

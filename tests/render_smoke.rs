@@ -213,6 +213,34 @@ fn pinned_job_shows_star_marker() {
 }
 
 #[test]
+fn log_copy_view_shows_plain_log_and_hint() {
+    use lazyslurm::models::{Job, JobState};
+    use std::io::Write;
+
+    // A real log file so read_tail_for_job resolves to the Lines branch.
+    let path = std::env::temp_dir().join("lazyslurm_copytest.log");
+    let mut f = std::fs::File::create(&path).unwrap();
+    writeln!(f, "first log line").unwrap();
+    writeln!(f, "second log line").unwrap();
+    f.flush().unwrap();
+
+    let mut job = Job::new("9".into(), "logger".into(), "u".into(), JobState::Running);
+    job.std_out = Some(path.to_string_lossy().into_owned());
+
+    let mut app = App::new();
+    app.state = AppState::LogCopy;
+    app.fullscreen_job = Some(job);
+    app.log_follow = true;
+
+    let text = rendered_text(&app);
+    assert!(text.contains("COPY"), "copy badge shown");
+    assert!(text.contains("select text to copy"), "copy hint shown");
+    assert!(text.contains("second log line"), "log content shown");
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
 fn cluster_tabs_render_when_empty() {
     // An empty list with no error must not panic and should show the hint.
     for tab in [ActiveTab::Nodes, ActiveTab::Partitions] {

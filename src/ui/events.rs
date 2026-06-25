@@ -1,8 +1,10 @@
 use crate::app::{ActiveTab, App, AppState, FocusPanel};
 use crate::{panel_rects, render_app, tab_rects};
 use ratatui::crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEvent, MouseEventKind,
 };
+use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
@@ -20,7 +22,27 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::Fullscreen => event_fullscreen(app, key),
         AppState::HistoryDetail => event_history_detail(app, key),
         AppState::FilterInput => event_filter_input(app, key),
+        AppState::LogCopy => event_log_copy(app, key),
     }
+}
+
+/// Plain-text copy view. Mouse capture is released (see `run_event_loop`), so
+/// the terminal handles selection; here we just scroll and exit.
+fn event_log_copy(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    const PAGE: u16 = 10;
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _)
+        | (KeyCode::Char('q'), _)
+        | (KeyCode::Char('Q'), _)
+        | (KeyCode::Char('y'), _) => app.exit_log_copy(),
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.fullscreen_scroll_up(1),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.fullscreen_scroll_down(1),
+        (KeyCode::PageUp, _) => app.fullscreen_scroll_up(PAGE),
+        (KeyCode::PageDown, _) => app.fullscreen_scroll_down(PAGE),
+        _ => {}
+    }
+    Ok(None)
 }
 
 /// Live filter typing. Every keystroke re-filters the in-memory list, so it is
@@ -155,6 +177,13 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('P'), _) if app.active_tab == ActiveTab::Jobs => {
             app.toggle_pin();
         }
+        // Copy the selected job's log: open the plain-text view from the
+        // focused inline Logs pane.
+        (KeyCode::Char('y'), _)
+            if app.active_tab == ActiveTab::Jobs && app.focus == FocusPanel::Logs =>
+        {
+            app.enter_log_copy();
+        }
         _ => {}
     }
     Ok(None)
@@ -176,6 +205,9 @@ fn event_fullscreen(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn 
         (KeyCode::PageUp, _) => app.fullscreen_scroll_up(PAGE),
         (KeyCode::PageDown, _) => app.fullscreen_scroll_down(PAGE),
         (KeyCode::Char('G'), _) | (KeyCode::Char('g'), _) => app.fullscreen_follow(),
+        (KeyCode::Char('y'), _) if app.fullscreen_panel == FocusPanel::Logs => {
+            app.enter_log_copy();
+        }
         _ => {}
     }
     Ok(None)
@@ -224,9 +256,23 @@ pub async fn run_event_loop(
 ) -> Result<(), Box<dyn Error>> {
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
+    // Track mouse capture so we can release it for the copy view (letting the
+    // terminal handle text selection) and restore it on the way back.
+    let mut mouse_captured = true;
 
     loop {
         app.drain_events();
+
+        let want_capture = app.state != AppState::LogCopy;
+        if want_capture != mouse_captured {
+            if want_capture {
+                execute!(terminal.backend_mut(), EnableMouseCapture)?;
+            } else {
+                execute!(terminal.backend_mut(), DisableMouseCapture)?;
+            }
+            mouse_captured = want_capture;
+        }
+
         terminal.draw(|frame| render_app(frame, app))?;
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())

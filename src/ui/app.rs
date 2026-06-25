@@ -62,6 +62,9 @@ pub enum AppState {
     HistoryDetail,
     /// Typing into the live job-list filter on the Jobs tab.
     FilterInput,
+    /// Plain, borderless log view with mouse capture released so the terminal's
+    /// own text selection works for copying.
+    LogCopy,
 }
 
 /// Which dashboard panel currently holds keyboard focus. Drives the accent
@@ -144,6 +147,8 @@ pub struct App {
     /// Job ids the user pinned. Pinned jobs float to the top of the list and
     /// stay visible even when the filter would otherwise hide them.
     pub pinned: std::collections::HashSet<String>,
+    /// The state to return to when leaving the copy view.
+    pub log_copy_origin: AppState,
 }
 
 impl App {
@@ -200,6 +205,7 @@ impl App {
             history_detail_scroll: 0,
             filter_query: String::new(),
             pinned: std::collections::HashSet::new(),
+            log_copy_origin: AppState::Normal,
         }
     }
 
@@ -719,6 +725,32 @@ impl App {
         self.log_follow = true;
     }
 
+    /// Enter the plain-text copy view for the current log. Reachable from the
+    /// fullscreen Logs view or from the inline Logs pane when it has focus. The
+    /// event loop releases mouse capture while this state is active so the
+    /// terminal's native selection works.
+    pub fn enter_log_copy(&mut self) {
+        if self.fullscreen_job.is_none() {
+            // Coming from the inline pane: snapshot the selected job and show
+            // the newest lines.
+            let Some(job) = self.selected_job.clone() else {
+                return;
+            };
+            self.fullscreen_job = Some(job);
+            self.log_follow = true;
+        }
+        self.log_copy_origin = self.state;
+        self.state = AppState::LogCopy;
+    }
+
+    pub fn exit_log_copy(&mut self) {
+        self.state = self.log_copy_origin;
+        // If we synthesised the fullscreen job to get here, drop it again.
+        if self.log_copy_origin == AppState::Normal {
+            self.fullscreen_job = None;
+        }
+    }
+
     /// Re-resolve the selection after the job list changes. Follows the
     /// previously selected job by id if it still exists, otherwise clamps
     /// the index so it stays in bounds.
@@ -884,6 +916,36 @@ mod tests {
         assert_eq!(app.selected_job_index, 0);
         assert_eq!(app.selected_job.as_ref().unwrap().job_id, "202");
         assert!(app.is_pinned(&job("202", "c")));
+    }
+
+    #[test]
+    fn log_copy_from_inline_snapshots_job_and_returns_to_normal() {
+        let mut app = app_with_jobs(vec![job("1", "a")]);
+        app.update_selected_job();
+        app.focus = FocusPanel::Logs;
+
+        app.enter_log_copy();
+        assert_eq!(app.state, AppState::LogCopy);
+        assert!(app.fullscreen_job.is_some(), "snapshots the selected job");
+
+        app.exit_log_copy();
+        assert_eq!(app.state, AppState::Normal);
+        assert!(app.fullscreen_job.is_none(), "synthetic snapshot is dropped");
+    }
+
+    #[test]
+    fn log_copy_from_fullscreen_returns_to_fullscreen() {
+        let mut app = app_with_jobs(vec![job("1", "a")]);
+        app.fullscreen_job = Some(job("1", "a"));
+        app.fullscreen_panel = FocusPanel::Logs;
+        app.state = AppState::Fullscreen;
+
+        app.enter_log_copy();
+        assert_eq!(app.state, AppState::LogCopy);
+
+        app.exit_log_copy();
+        assert_eq!(app.state, AppState::Fullscreen, "returns to where it came from");
+        assert!(app.fullscreen_job.is_some(), "fullscreen job is kept");
     }
 
     #[test]
