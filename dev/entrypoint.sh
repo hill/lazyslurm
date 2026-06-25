@@ -43,7 +43,10 @@ sed -i "s/^NodeName=.*/NodeName=slurmctld CPUs=${CPUS} State=UNKNOWN/" /etc/slur
 slurmctld -D &
 slurmd -D &
 sleep 5
-scontrol update NodeName=slurmctld State=IDLE || true
+# RESUME (not IDLE) so a drain left over from a previous hard kill clears too.
+# A "Kill task failed" drain persists in the saved state across restarts and
+# would otherwise leave every new job stuck pending.
+scontrol update NodeName=slurmctld State=RESUME || true
 
 echo 'SLURM ready (accounting enabled)! Your project is at /workspace'
 echo 'Run: cargo run'
