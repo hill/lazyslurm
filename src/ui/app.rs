@@ -76,7 +76,6 @@ pub enum FocusPanel {
     Logs,
 }
 
-
 pub struct App {
     pub job_list: JobList,
     pub state: AppState,
@@ -428,8 +427,9 @@ impl App {
                             {
                                 self.selected_node_index = i;
                             }
-                            self.selected_node_index =
-                                self.selected_node_index.min(self.nodes.len().saturating_sub(1));
+                            self.selected_node_index = self
+                                .selected_node_index
+                                .min(self.nodes.len().saturating_sub(1));
                             self.nodes_error = None;
                         }
                         Err(e) => self.nodes_error = Some(e),
@@ -699,7 +699,10 @@ impl App {
 
     /// Open the raw view for the selected (or fullscreened) job's log.
     pub fn open_raw_log_for_job(&mut self) {
-        let job = self.fullscreen_job.clone().or_else(|| self.selected_job.clone());
+        let job = self
+            .fullscreen_job
+            .clone()
+            .or_else(|| self.selected_job.clone());
         let Some(job) = job else {
             return;
         };
@@ -852,11 +855,19 @@ mod tests {
         ]);
 
         app.filter_query = "TRAIN".into();
-        let ids: Vec<&str> = app.visible_jobs().iter().map(|j| j.job_id.as_str()).collect();
+        let ids: Vec<&str> = app
+            .visible_jobs()
+            .iter()
+            .map(|j| j.job_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["100", "202"]);
 
         app.filter_query = "202".into();
-        let ids: Vec<&str> = app.visible_jobs().iter().map(|j| j.job_id.as_str()).collect();
+        let ids: Vec<&str> = app
+            .visible_jobs()
+            .iter()
+            .map(|j| j.job_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["202"]);
     }
 
@@ -872,17 +883,17 @@ mod tests {
         app.pinned.insert("101".into());
         app.filter_query = "train".into();
 
-        let ids: Vec<&str> = app.visible_jobs().iter().map(|j| j.job_id.as_str()).collect();
+        let ids: Vec<&str> = app
+            .visible_jobs()
+            .iter()
+            .map(|j| j.job_id.as_str())
+            .collect();
         assert_eq!(ids, vec!["101", "100", "202"], "pinned first, then matches");
     }
 
     #[test]
     fn toggling_a_pin_keeps_the_same_job_selected() {
-        let mut app = app_with_jobs(vec![
-            job("100", "a"),
-            job("101", "b"),
-            job("202", "c"),
-        ]);
+        let mut app = app_with_jobs(vec![job("100", "a"), job("101", "b"), job("202", "c")]);
 
         // Select the last job, then pin it: it floats to the top but stays selected.
         app.selected_job_index = 2;
@@ -903,7 +914,10 @@ mod tests {
 
         app.open_raw_log_for_job();
         assert_eq!(app.state, AppState::RawLog);
-        assert!(!app.raw_log_paths.is_empty(), "collects candidate log paths");
+        assert!(
+            !app.raw_log_paths.is_empty(),
+            "collects candidate log paths"
+        );
 
         app.exit_raw_log();
         assert_eq!(app.state, AppState::Normal);
@@ -920,7 +934,11 @@ mod tests {
         assert_eq!(app.state, AppState::RawLog);
 
         app.exit_raw_log();
-        assert_eq!(app.state, AppState::Fullscreen, "returns to where it came from");
+        assert_eq!(
+            app.state,
+            AppState::Fullscreen,
+            "returns to where it came from"
+        );
     }
 
     #[test]

@@ -10,7 +10,12 @@ pub struct SlurmParser;
 /// Parse an `allocated/idle/other/total` quadruple. Missing parts fall to zero.
 fn parse_aiot(field: &str) -> (u32, u32, u32, u32) {
     let mut parts = field.split('/');
-    let mut next = || parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+    let mut next = || {
+        parts
+            .next()
+            .and_then(|p| p.trim().parse().ok())
+            .unwrap_or(0)
+    };
     (next(), next(), next(), next())
 }
 
@@ -395,7 +400,10 @@ mod cluster_tests {
         assert_eq!(nodes.len(), 1);
         let n = &nodes[0];
         assert_eq!(n.name, "node01");
-        assert_eq!((n.cpus_alloc, n.cpus_idle, n.cpus_other, n.cpus_total), (12, 20, 0, 32));
+        assert_eq!(
+            (n.cpus_alloc, n.cpus_idle, n.cpus_other, n.cpus_total),
+            (12, 20, 0, 32)
+        );
         assert_eq!(n.memory_mb, Some(257000));
         assert_eq!(n.free_mem_mb, Some(120000));
         assert_eq!(n.gres.as_deref(), Some("gpu:a100:4"));
@@ -418,7 +426,14 @@ mod cluster_tests {
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0].name, "batch");
         assert!(parts[0].is_default);
-        assert_eq!((parts[0].nodes_alloc, parts[0].nodes_idle, parts[0].nodes_total), (10, 20, 32));
+        assert_eq!(
+            (
+                parts[0].nodes_alloc,
+                parts[0].nodes_idle,
+                parts[0].nodes_total
+            ),
+            (10, 20, 32)
+        );
         assert!(parts[0].is_up());
         assert!(!parts[1].is_default);
         assert!(!parts[1].is_up());

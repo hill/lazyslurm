@@ -73,7 +73,10 @@ fn tab_bar_shows_every_tab() {
 #[test]
 fn status_bar_has_no_middot_separator() {
     let app = App::new();
-    assert!(!rendered_text(&app).contains('·'), "the · separator should be gone");
+    assert!(
+        !rendered_text(&app).contains('·'),
+        "the · separator should be gone"
+    );
 }
 
 #[test]
@@ -90,7 +93,9 @@ fn clicking_a_tab_label_hits_that_tab() {
     let width = buf.area.width as usize;
     let row0: String = buf.content()[..width].iter().map(|c| c.symbol()).collect();
 
-    let col = row0.find("Nodes").expect("Nodes tab should render in the status row") as u16;
+    let col = row0
+        .find("Nodes")
+        .expect("Nodes tab should render in the status row") as u16;
     assert_eq!(tab_rects(area).hit(col, 0), Some(ActiveTab::Nodes));
     // A click far to the left, over the title, hits no tab.
     assert_eq!(tab_rects(area).hit(2, 0), None);
@@ -113,7 +118,10 @@ fn partitions_tab_marks_default_and_shows_limit() {
     app.active_tab = ActiveTab::Partitions;
     app.partitions = vec![sample_partition()];
     let text = rendered_text(&app);
-    assert!(text.contains("batch*"), "default partition should carry the star");
+    assert!(
+        text.contains("batch*"),
+        "default partition should carry the star"
+    );
     assert!(text.contains("7-00:00:00"));
 }
 
@@ -189,8 +197,18 @@ fn jobs_filter_line_and_count_render() {
     use lazyslurm::models::{Job, JobState};
     let mut app = App::new();
     app.job_list.update(vec![
-        Job::new("100".into(), "train_resnet".into(), "u".into(), JobState::Running),
-        Job::new("101".into(), "eval_run".into(), "u".into(), JobState::Running),
+        Job::new(
+            "100".into(),
+            "train_resnet".into(),
+            "u".into(),
+            JobState::Running,
+        ),
+        Job::new(
+            "101".into(),
+            "eval_run".into(),
+            "u".into(),
+            JobState::Running,
+        ),
     ]);
     app.filter_query = "train".into();
     let text = rendered_text(&app);

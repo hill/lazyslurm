@@ -1,10 +1,3 @@
-use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
-};
 use crate::slurm::SlurmParser;
 use crate::slurm::logs::{LogRead, TAIL_BYTES, read_tail_for_job, read_tail_for_paths};
 use crate::ui::theme;
@@ -12,6 +5,13 @@ use crate::ui::{ActiveTab, App, FocusPanel};
 use crate::{
     AppState,
     models::{AcctDetail, AcctEntry, Job, Node},
+};
+use ratatui::{
+    Frame,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 fn render_text_popup(title: &str, app: &App, frame: &mut Frame) {
@@ -100,9 +100,19 @@ pub fn render_app(frame: &mut Frame, app: &App) {
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("y", Style::default().fg(theme::RUNNING).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "y",
+                        Style::default()
+                            .fg(theme::RUNNING)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" confirm    ", Style::default().fg(theme::MUTED)),
-                    Span::styled("n", Style::default().fg(theme::FAILED).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "n",
+                        Style::default()
+                            .fg(theme::FAILED)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" cancel", Style::default().fg(theme::MUTED)),
                 ]),
             ];
@@ -317,7 +327,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             ),
             Span::styled(
                 format!("  {error}"),
-                Style::default().fg(theme::FAILED).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::FAILED)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]);
         frame.render_widget(Paragraph::new(line), cols[0]);
@@ -382,7 +394,11 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
 
     // A filter line appears above the header only while a filter is in play.
     let constraints: &[Constraint] = if filtering {
-        &[Constraint::Length(1), Constraint::Length(1), Constraint::Min(0)]
+        &[
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ]
     } else {
         &[Constraint::Length(1), Constraint::Min(0)]
     };
@@ -458,7 +474,10 @@ fn filter_line(app: &App) -> Line<'static> {
     let accent = if typing { theme::ACCENT } else { theme::MUTED };
 
     let mut spans = vec![
-        Span::styled("/", Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "/",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             app.filter_query.clone(),
             Style::default().fg(if typing { theme::FG } else { theme::MUTED }),
@@ -506,7 +525,10 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
 fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
     let block = theme::panel("Logs", app.focus == FocusPanel::Logs);
 
-    match app.get_selected_job().map(|job| read_tail_for_job(job, TAIL_BYTES)) {
+    match app
+        .get_selected_job()
+        .map(|job| read_tail_for_job(job, TAIL_BYTES))
+    {
         Some(LogRead::Lines { path, text }) => {
             let content = format!("{path}\n{}\n{text}", "─".repeat(40));
             let line_count = content.lines().count();
@@ -520,7 +542,9 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        Some(LogRead::Empty(_)) => render_placeholder(frame, block, area, "This job's log is empty"),
+        Some(LogRead::Empty(_)) => {
+            render_placeholder(frame, block, area, "This job's log is empty")
+        }
         Some(LogRead::Missing(_)) => render_placeholder(frame, block, area, "No log output yet"),
         None => render_placeholder(frame, block, area, "Select a job to view logs"),
     }
@@ -587,7 +611,12 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
             &[("esc", "close"), ("Enter", "submit")]
         }
         AppState::Fullscreen => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
-        AppState::HistoryDetail => &[("esc", "back"), ("↑↓", "scroll"), ("y", "raw"), ("q", "quit")],
+        AppState::HistoryDetail => &[
+            ("esc", "back"),
+            ("↑↓", "scroll"),
+            ("y", "raw"),
+            ("q", "quit"),
+        ],
         AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
         AppState::RawLog => &[("↑↓", "scroll"), ("esc", "exit")],
     };
@@ -623,10 +652,7 @@ fn empty_state_lines(quote: crate::ui::quotes::Quote) -> Vec<Line<'static>> {
     vec![
         Line::from(""),
         theme::gradient_line("L A Z Y S L U R M"),
-        Line::styled(
-            "a tiny SLURM dashboard",
-            Style::default().fg(theme::MUTED),
-        ),
+        Line::styled("a tiny SLURM dashboard", Style::default().fg(theme::MUTED)),
         Line::from(""),
         Line::styled("No jobs found", Style::default().fg(theme::FG)),
         Line::from(""),
@@ -688,7 +714,10 @@ fn job_detail_lines(job: &Job) -> Vec<Line<'static>> {
         } else {
             "Started"
         };
-        lines.push(kv(label, start_time.format("%Y-%m-%d %H:%M:%S").to_string()));
+        lines.push(kv(
+            label,
+            start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+        ));
     }
     if let Some(duration) = job.duration() {
         let total = duration.num_seconds();
@@ -838,9 +867,12 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        LogRead::Empty(_) => {
-            render_placeholder(frame, theme::panel("Logs", true), area, "This job's log is empty")
-        }
+        LogRead::Empty(_) => render_placeholder(
+            frame,
+            theme::panel("Logs", true),
+            area,
+            "This job's log is empty",
+        ),
         LogRead::Missing(_) => {
             render_placeholder(frame, theme::panel("Logs", true), area, "No log output yet")
         }
@@ -865,7 +897,10 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
 
     match read_tail_for_paths(app.raw_log_paths.clone(), TAIL_BYTES) {
         LogRead::Lines { path, text } => {
-            header.push(Span::styled(format!("  {path}"), Style::default().fg(theme::MUTED)));
+            header.push(Span::styled(
+                format!("  {path}"),
+                Style::default().fg(theme::MUTED),
+            ));
             header.push(Span::styled(
                 "   esc to exit",
                 Style::default().fg(theme::DIM_BORDER),
@@ -888,11 +923,21 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
         }
         LogRead::Empty(_) => {
             frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
-            render_placeholder(frame, theme::panel("Logs", true), rows[1], "This job's log is empty");
+            render_placeholder(
+                frame,
+                theme::panel("Logs", true),
+                rows[1],
+                "This job's log is empty",
+            );
         }
         LogRead::Missing(_) => {
             frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
-            render_placeholder(frame, theme::panel("Logs", true), rows[1], "No log output yet");
+            render_placeholder(
+                frame,
+                theme::panel("Logs", true),
+                rows[1],
+                "No log output yet",
+            );
         }
     }
 }
@@ -922,10 +967,7 @@ fn render_cluster_list(
                     .add_modifier(Modifier::ITALIC),
             ),
         ];
-        frame.render_widget(
-            Paragraph::new(body).alignment(Alignment::Center),
-            inner,
-        );
+        frame.render_widget(Paragraph::new(body).alignment(Alignment::Center), inner);
         return;
     }
 
@@ -983,7 +1025,12 @@ fn row_base(selected: bool) -> (Span<'static>, Style) {
 }
 
 /// A short braille bar showing `filled` of `total` in `color`.
-fn mini_bar(filled: usize, total: usize, width: usize, color: ratatui::style::Color) -> Vec<Span<'static>> {
+fn mini_bar(
+    filled: usize,
+    total: usize,
+    width: usize,
+    color: ratatui::style::Color,
+) -> Vec<Span<'static>> {
     let cells = if total == 0 {
         0
     } else {
@@ -1038,7 +1085,10 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 rail,
-                Span::styled(format!("{:<18}", truncate(&node.name, 17)), base.fg(theme::FG)),
+                Span::styled(
+                    format!("{:<18}", truncate(&node.name, 17)),
+                    base.fg(theme::FG),
+                ),
                 Span::styled(format!("{:<10}", truncate(&node.state, 9)), base.fg(color)),
             ];
             spans.extend(mini_bar(
@@ -1052,22 +1102,41 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
                 base.fg(theme::MUTED),
             ));
             spans.push(Span::styled(
-                format!("{:<12}", format!("{}/{}", fmt_gb(node.free_mem_mb), fmt_gb(node.memory_mb))),
+                format!(
+                    "{:<12}",
+                    format!("{}/{}", fmt_gb(node.free_mem_mb), fmt_gb(node.memory_mb))
+                ),
                 base.fg(theme::MUTED),
             ));
             spans.push(Span::styled(
                 format!("{:<20}", truncate(node.gres.as_deref().unwrap_or("-"), 19)),
                 base.fg(theme::FG),
             ));
-            spans.push(Span::styled(truncate(&node.partition, 12), base.fg(theme::MUTED)));
+            spans.push(Span::styled(
+                truncate(&node.partition, 12),
+                base.fg(theme::MUTED),
+            ));
 
             ListItem::new(Line::from(spans)).style(base)
         })
         .collect();
 
     let title = format!("Nodes ({})", app.nodes.len());
-    let message = cluster_message(app.nodes_loading, &app.nodes_error, app.nodes.is_empty(), "No nodes reported");
-    render_cluster_list(frame, &title, &header, items, app.selected_node_index, message, area);
+    let message = cluster_message(
+        app.nodes_loading,
+        &app.nodes_error,
+        app.nodes.is_empty(),
+        "No nodes reported",
+    );
+    render_cluster_list(
+        frame,
+        &title,
+        &header,
+        items,
+        app.selected_node_index,
+        message,
+        area,
+    );
 }
 
 fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1104,13 +1173,13 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
                 theme::RUNNING,
             ));
             spans.push(Span::styled(
-                format!(" {:<7}", format!("{}/{}", part.nodes_idle, part.nodes_total)),
+                format!(
+                    " {:<7}",
+                    format!("{}/{}", part.nodes_idle, part.nodes_total)
+                ),
                 base.fg(theme::MUTED),
             ));
-            spans.push(Span::styled(
-                format!("{:<10}", ""),
-                base.fg(theme::MUTED),
-            ));
+            spans.push(Span::styled(format!("{:<10}", ""), base.fg(theme::MUTED)));
             spans.push(Span::styled(part.time_limit.clone(), base.fg(theme::FG)));
 
             ListItem::new(Line::from(spans)).style(base)
@@ -1124,7 +1193,15 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
         app.partitions.is_empty(),
         "No partitions reported",
     );
-    render_cluster_list(frame, &title, &header, items, app.selected_partition_index, message, area);
+    render_cluster_list(
+        frame,
+        &title,
+        &header,
+        items,
+        app.selected_partition_index,
+        message,
+        area,
+    );
 }
 
 fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1143,11 +1220,26 @@ fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 rail,
-                Span::styled(format!("{:<12}", truncate(&entry.job_id, 11)), base.fg(theme::FG)),
-                Span::styled(format!("{:<18}", truncate(&entry.name, 17)), base.fg(theme::FG)),
-                Span::styled(format!("{:<12}", truncate(&entry.state, 11)), base.fg(color)),
-                Span::styled(format!("{:<8}", entry.exit_code.clone()), base.fg(theme::MUTED)),
-                Span::styled(format!("{:<12}", entry.elapsed.clone()), base.fg(theme::MUTED)),
+                Span::styled(
+                    format!("{:<12}", truncate(&entry.job_id, 11)),
+                    base.fg(theme::FG),
+                ),
+                Span::styled(
+                    format!("{:<18}", truncate(&entry.name, 17)),
+                    base.fg(theme::FG),
+                ),
+                Span::styled(
+                    format!("{:<12}", truncate(&entry.state, 11)),
+                    base.fg(color),
+                ),
+                Span::styled(
+                    format!("{:<8}", entry.exit_code.clone()),
+                    base.fg(theme::MUTED),
+                ),
+                Span::styled(
+                    format!("{:<12}", entry.elapsed.clone()),
+                    base.fg(theme::MUTED),
+                ),
                 Span::styled(truncate(&entry.end, 19), base.fg(theme::MUTED)),
             ]))
             .style(base)
@@ -1159,10 +1251,23 @@ fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
     let message = if app.history_error.is_some() {
         Some("Accounting not available (slurmdbd not configured)")
     } else {
-        cluster_message(app.history_loading, &None, app.history.is_empty(), "No recent jobs")
+        cluster_message(
+            app.history_loading,
+            &None,
+            app.history.is_empty(),
+            "No recent jobs",
+        )
     };
     let title = format!("History ({})", app.history.len());
-    render_cluster_list(frame, &title, &header, items, app.selected_history_index, message, area);
+    render_cluster_list(
+        frame,
+        &title,
+        &header,
+        items,
+        app.selected_history_index,
+        message,
+        area,
+    );
 }
 
 fn history_color(entry: &AcctEntry) -> ratatui::style::Color {
@@ -1225,7 +1330,12 @@ fn render_history_detail(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let hints: &[(&str, &str)] = &[("esc", "back"), ("↑↓", "scroll"), ("y", "raw"), ("q", "quit")];
+    let hints: &[(&str, &str)] = &[
+        ("esc", "back"),
+        ("↑↓", "scroll"),
+        ("y", "raw"),
+        ("q", "quit"),
+    ];
     frame.render_widget(Paragraph::new(hint_line(hints)), rows[3]);
 }
 
@@ -1276,7 +1386,11 @@ fn acct_detail_lines(d: &AcctDetail) -> Vec<Line<'static>> {
     );
 
     let used = d.max_rss.as_deref().unwrap_or("--");
-    let req = if d.req_mem.is_empty() { "--" } else { &d.req_mem };
+    let req = if d.req_mem.is_empty() {
+        "--"
+    } else {
+        &d.req_mem
+    };
 
     let mut lines = vec![Line::from(badge), Line::from("")];
     lines.push(kv("User", d.user.clone()));
@@ -1312,11 +1426,7 @@ fn render_history_detail_logs(frame: &mut Frame, app: &App, detail: &AcctDetail,
         LogRead::Lines { path, text } => {
             let content = format!("{path}\n{}\n{text}", "─".repeat(40));
             let total = content.lines().count();
-            let offset = clamp_scroll(
-                app.history_detail_scroll,
-                total,
-                block.inner(area).height,
-            );
+            let offset = clamp_scroll(app.history_detail_scroll, total, block.inner(area).height);
             frame.render_widget(
                 Paragraph::new(content)
                     .style(Style::default().fg(theme::FG))

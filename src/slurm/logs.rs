@@ -101,7 +101,10 @@ mod tests {
     fn tail_handles_empty_file() {
         let path = temp_path("empty.log");
         std::fs::write(&path, "").unwrap();
-        assert_eq!(tail_file(path.to_str().unwrap(), TAIL_BYTES), Some(String::new()));
+        assert_eq!(
+            tail_file(path.to_str().unwrap(), TAIL_BYTES),
+            Some(String::new())
+        );
         std::fs::remove_file(&path).ok();
     }
 
