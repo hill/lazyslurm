@@ -2,10 +2,12 @@ FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install SLURM and dependencies
+# Install SLURM, the accounting daemon (slurmdbd), and MariaDB for it to use.
 RUN apt-get update && apt-get install -y \
     slurm-wlm \
     slurm-wlm-basic-plugins \
+    slurmdbd \
+    mariadb-server \
     munge \
     curl \
     build-essential \
@@ -21,7 +23,9 @@ RUN /usr/sbin/create-munge-key
 RUN chown munge:munge /etc/munge/munge.key
 RUN chmod 400 /etc/munge/munge.key
 
-# Create basic SLURM config
+# Basic SLURM config. The AccountingStorage* lines point the controller at
+# slurmdbd so finished jobs land in the database that `sacct` reads, and
+# JobAcctGather records per-job resource usage.
 RUN echo "ClusterName=lazyslurm_dev" > /etc/slurm-llnl/slurm.conf && \
     echo "ControlMachine=slurmctld" >> /etc/slurm-llnl/slurm.conf && \
     echo "SlurmUser=root" >> /etc/slurm-llnl/slurm.conf && \
@@ -35,21 +39,42 @@ RUN echo "ClusterName=lazyslurm_dev" > /etc/slurm-llnl/slurm.conf && \
     echo "TaskPlugin=task/none" >> /etc/slurm-llnl/slurm.conf && \
     echo "ReturnToService=2" >> /etc/slurm-llnl/slurm.conf && \
     echo "MaxJobCount=10000" >> /etc/slurm-llnl/slurm.conf && \
+    echo "AccountingStorageType=accounting_storage/slurmdbd" >> /etc/slurm-llnl/slurm.conf && \
+    echo "AccountingStorageHost=localhost" >> /etc/slurm-llnl/slurm.conf && \
+    echo "AccountingStoragePort=6819" >> /etc/slurm-llnl/slurm.conf && \
+    echo "JobAcctGatherType=jobacct_gather/linux" >> /etc/slurm-llnl/slurm.conf && \
+    echo "JobAcctGatherFrequency=30" >> /etc/slurm-llnl/slurm.conf && \
     echo "NodeName=slurmctld CPUs=5 State=UNKNOWN" >> /etc/slurm-llnl/slurm.conf && \
     echo "PartitionName=debug Nodes=slurmctld Default=YES MaxTime=INFINITE State=UP" >> /etc/slurm-llnl/slurm.conf
+
+# slurmdbd config. Must be mode 600 and owned by SlurmUser or slurmdbd refuses
+# to start.
+RUN printf '%s\n' \
+    "AuthType=auth/munge" \
+    "DbdHost=localhost" \
+    "DbdPort=6819" \
+    "SlurmUser=root" \
+    "DebugLevel=info" \
+    "LogFile=/var/log/slurm/slurmdbd.log" \
+    "PidFile=/var/run/slurm/slurmdbd.pid" \
+    "StorageType=accounting_storage/mysql" \
+    "StorageHost=localhost" \
+    "StoragePort=3306" \
+    "StorageUser=slurm" \
+    "StoragePass=slurmpass" \
+    "StorageLoc=slurm_acct_db" \
+    > /etc/slurm-llnl/slurmdbd.conf && \
+    chmod 600 /etc/slurm-llnl/slurmdbd.conf && \
+    chown root:root /etc/slurm-llnl/slurmdbd.conf
+
+# Let MariaDB bind locally; defaults are fine for a single-container dev box.
+RUN sed -i 's/^bind-address.*/bind-address = 127.0.0.1/' /etc/mysql/mariadb.conf.d/50-server.cnf || true
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Startup script
-CMD bash -c " \
-    service munge start && \
-    slurmctld -D & \
-    slurmd -D & \
-    sleep 5 && \
-    scontrol update NodeName=slurmctld State=IDLE && \
-    echo 'SLURM ready! Your project is at /workspace' && \
-    echo 'Run: cargo run' && \
-    echo 'Submit test: sbatch --wrap=\"sleep 60\" --job-name=test' && \
-    bash"
+COPY dev/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
