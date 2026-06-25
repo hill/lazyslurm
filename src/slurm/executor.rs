@@ -13,12 +13,9 @@ pub trait SlurmExecutor: Send + Sync {
     /// Per-partition summary for the Partitions tab (`sinfo -s`).
     async fn sinfo_partitions(&self) -> Result<String>;
 
-    /// Finished-job accounting for the History tab (`sacct`). Errors when
-    /// slurmdbd accounting isn't configured, which the caller surfaces as a
-    /// "accounting unavailable" message rather than an empty list.
+    /// Finished-job accounting (`sacct`). Errors if accounting isn't configured.
     async fn sacct(&self, user: Option<&str>) -> Result<String>;
 
-    /// Full accounting detail for one job, including its step rows so MaxRSS is
-    /// available. Backs the History detail view.
+    /// Full detail for one job, including step rows so MaxRSS is available.
     async fn sacct_job(&self, job_id: &str) -> Result<String>;
 }

@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-/// One finished (or running) job from `sacct`. Times are kept as the raw
-/// strings sacct prints, since the History view only displays them.
+/// One finished job from `sacct`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcctEntry {
     pub job_id: String,
     pub name: String,
     pub state: String,
-    /// sacct prints exit as `code:signal`, e.g. `0:0` or `1:0`.
+    /// `code:signal`, e.g. `0:0`.
     pub exit_code: String,
     pub elapsed: String,
     pub start: String,
@@ -15,16 +14,13 @@ pub struct AcctEntry {
 }
 
 impl AcctEntry {
-    /// True when the job ended cleanly (`0:0`). Anything else is treated as a
-    /// failure for colouring, regardless of the state string.
+    /// True when the job ended cleanly (`0:0` and COMPLETED).
     pub fn succeeded(&self) -> bool {
         self.exit_code == "0:0" && self.state.eq_ignore_ascii_case("COMPLETED")
     }
 }
 
-/// The full accounting record for one finished job, shown in the History detail
-/// view. Fetched on demand with `sacct -j <id>`. `max_rss` is folded in from the
-/// job's step rows, since the allocation row never carries it.
+/// Full `sacct -j` detail for one job, for the History detail view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcctDetail {
     pub job_id: String,

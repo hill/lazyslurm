@@ -1,10 +1,3 @@
-//! Visual language for the TUI. A single palette plus small helpers so every
-//! panel pulls colour, borders, and badges from one place.
-//!
-//! Palette is `Color::Rgb` (truecolour) rather than raw ANSI so it renders the
-//! same across terminals. Hues are derived from Charm's "charmtone" set but
-//! mapped to SLURM job states.
-
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

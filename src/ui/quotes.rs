@@ -1,7 +1,3 @@
-//! Rotating quotes for the empty-state Details panel. One is picked per
-//! session so the dashboard feels a little alive without flickering between
-//! frames.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type Quote = (&'static str, &'static str);

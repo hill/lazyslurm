@@ -5,16 +5,8 @@ use std::sync::Mutex;
 
 use crate::slurm::executor::SlurmExecutor;
 
-/// A fake [`SlurmExecutor`] that reads canned outputs from a fixture directory.
-///
-/// Layout:
-/// ```text
-/// <fixture_dir>/
-///   squeue.txt              # squeue output for any user/partition filter
-///   scontrol/<job_id>.txt   # one file per job_id
-/// ```
-///
-/// `scancel` calls are recorded in [`Self::cancelled`] for test assertions.
+/// A fake [`SlurmExecutor`] reading canned outputs from a fixture directory
+/// (`squeue.txt`, `scontrol/<id>.txt`, etc). Records `scancel` ids for tests.
 pub struct SlurmFixture {
     pub fixture_dir: PathBuf,
     pub cancelled: Mutex<Vec<String>>,

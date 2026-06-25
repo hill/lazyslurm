@@ -62,9 +62,9 @@ pub enum AppState {
     HistoryDetail,
     /// Typing into the live job-list filter on the Jobs tab.
     FilterInput,
-    /// Plain, borderless log view with mouse capture released so the terminal's
-    /// own text selection works for copying.
-    LogCopy,
+    /// Plain, borderless log view with mouse capture released so the terminal
+    /// can select text.
+    RawLog,
 }
 
 /// Which dashboard panel currently holds keyboard focus. Drives the accent
@@ -90,35 +90,24 @@ pub struct App {
     pub error_message: Option<String>,
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
     pub event_receiver: mpsc::UnboundedReceiver<AppEvent>,
-    /// Job snapshotted when the cancel popup opens, so the cancel always
-    /// applies to the job the user confirmed, even if the list refreshes
-    /// underneath the popup.
+    /// Job snapshotted when the cancel popup opens, so a refresh can't change
+    /// what gets cancelled.
     pub cancel_target: Option<Job>,
     pub input: String,
     pub executor: Arc<dyn SlurmExecutor>,
-    /// Bumped whenever the user/partition filter changes, so results from
-    /// fetches started under the old filter are dropped on arrival.
+    /// Bumped on filter change so stale in-flight fetches are dropped.
     refresh_generation: u64,
-    /// Frame counter driven by the event loop, used to animate the spinner.
     pub tick: u64,
-    /// Quote shown on the empty-state panel, picked once per session.
     pub quote: crate::ui::quotes::Quote,
-    /// Panel holding keyboard focus on the dashboard.
     pub focus: FocusPanel,
-    /// Scroll offsets for the inline Details and Logs panels.
     pub details_scroll: u16,
     pub logs_scroll: u16,
-    /// Job snapshotted when a pane is fullscreened, so a background refresh
-    /// can't swap content out from under the view. Unused by the Jobs pane,
-    /// which renders the live list.
+    /// Job snapshotted while a pane is fullscreened so a refresh can't swap it.
     pub fullscreen_job: Option<Job>,
-    /// Which pane is zoomed while `state == Fullscreen`.
     pub fullscreen_panel: FocusPanel,
-    /// Scroll offset for the fullscreen Details and Logs views.
     pub fullscreen_scroll: u16,
-    /// Whether the fullscreen Logs view auto-scrolls to the newest line.
+    /// Whether the fullscreen Logs view follows the newest line.
     pub log_follow: bool,
-    /// Which top-level view is showing.
     pub active_tab: ActiveTab,
     pub nodes: Vec<Node>,
     pub selected_node_index: usize,
@@ -129,26 +118,22 @@ pub struct App {
     pub nodes_loading: bool,
     pub partitions_loading: bool,
     pub history_loading: bool,
-    /// Last error from each cluster view's fetch, shown in place of the list.
-    /// History sets this when slurmdbd accounting isn't available.
+    /// Per-view fetch error, shown in place of the list.
     pub nodes_error: Option<String>,
     pub partitions_error: Option<String>,
     pub history_error: Option<String>,
-    /// The finished job whose detail view is open, fetched on demand. The id is
-    /// snapshotted separately so the log path can be rebuilt before detail lands.
     pub history_detail: Option<AcctDetail>,
     pub history_detail_id: Option<String>,
     pub history_detail_loading: bool,
     pub history_detail_error: Option<String>,
     pub history_detail_scroll: u16,
-    /// Live, case-insensitive substring filter over the Jobs list (name or id).
-    /// Applied in memory, so it updates on every keystroke.
+    /// Live, case-insensitive filter over the Jobs list (name or id).
     pub filter_query: String,
-    /// Job ids the user pinned. Pinned jobs float to the top of the list and
-    /// stay visible even when the filter would otherwise hide them.
+    /// Pinned job ids. Pinned jobs float to the top and ignore the filter.
     pub pinned: std::collections::HashSet<String>,
-    /// The state to return to when leaving the copy view.
-    pub log_copy_origin: AppState,
+    /// Candidate log paths the raw view tails, and the state to return to.
+    pub raw_log_paths: Vec<String>,
+    pub raw_log_origin: AppState,
 }
 
 impl App {
@@ -205,7 +190,8 @@ impl App {
             history_detail_scroll: 0,
             filter_query: String::new(),
             pinned: std::collections::HashSet::new(),
-            log_copy_origin: AppState::Normal,
+            raw_log_paths: Vec::new(),
+            raw_log_origin: AppState::Normal,
         }
     }
 
@@ -218,8 +204,7 @@ impl App {
         app
     }
 
-    /// Fetch jobs and wait for the result. Used by headless mode, the
-    /// initial load, and tests; the TUI loop uses [`Self::start_refresh`].
+    /// Fetch jobs and wait. Used by headless mode, the initial load, and tests.
     pub async fn refresh_jobs(&mut self) -> Result<()> {
         self.is_loading = true;
         let result = Self::fetch_jobs(
@@ -233,9 +218,7 @@ impl App {
         Ok(())
     }
 
-    /// Kick off a fetch on a background task so the UI keeps rendering.
-    /// The result arrives as an [`AppEvent::JobsFetched`] and is applied
-    /// by [`Self::drain_events`]. No-op while a fetch is already running.
+    /// Fetch on a background task; the result arrives via `drain_events`.
     pub fn start_refresh(&mut self) {
         if self.is_loading {
             return;
@@ -278,8 +261,7 @@ impl App {
         self.switch_tab(ActiveTab::ALL[(i + n - 1) % n]);
     }
 
-    /// Re-fetch whichever cluster view is showing. The Jobs tab refreshes on
-    /// its own timer, so it's a no-op here.
+    /// Re-fetch the active cluster view (no-op on the Jobs tab).
     pub fn refresh_active_tab(&mut self) {
         match self.active_tab {
             ActiveTab::Jobs => {}
@@ -341,9 +323,7 @@ impl App {
         });
     }
 
-    /// Open the detail view for the selected History row and kick off its
-    /// fetch. The selected entry's id is snapshotted so the log path can be
-    /// rebuilt even before the richer detail arrives.
+    /// Open the History detail for the selected row and fetch it.
     pub fn open_history_detail(&mut self) {
         let Some(entry) = self.history.get(self.selected_history_index) else {
             return;
@@ -483,8 +463,7 @@ impl App {
                     self.history_loading = false;
                 }
                 AppEvent::HistoryDetailFetched(result) => {
-                    // Ignore a detail that arrives after the view was closed or
-                    // a different row was opened.
+                    // Ignore detail for a closed or changed view.
                     let still_open = self.state == AppState::HistoryDetail;
                     match result {
                         Ok(detail) if still_open => {
@@ -502,8 +481,7 @@ impl App {
         }
     }
 
-    /// Discard any in-flight fetch and start a fresh one. Called when the
-    /// user/partition filter changes so stale results can't apply.
+    /// Drop any in-flight fetch and start fresh (on filter change).
     pub fn invalidate_and_refresh(&mut self) {
         self.refresh_generation += 1;
         self.is_loading = false;
@@ -536,7 +514,7 @@ impl App {
             .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
-        // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)
+        // Enrich the first few jobs with scontrol detail.
         for job in jobs.iter_mut().take(10) {
             if let Ok(scontrol_output) = executor.scontrol_show_job(&job.job_id).await
                 && let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output)
@@ -552,10 +530,8 @@ impl App {
         self.last_refresh.elapsed() >= self.refresh_interval
     }
 
-    /// The jobs actually shown in the list: pinned jobs first (always visible),
-    /// then everything matching the filter, each keeping squeue order. The
-    /// single source of truth for what the list shows and what selection indexes
-    /// into, so rendering and navigation can't disagree.
+    /// The jobs shown in the list: pinned first, then filter matches, each in
+    /// squeue order. The source of truth for the list and for selection.
     pub fn visible_jobs(&self) -> Vec<&Job> {
         let q = self.filter_query.to_lowercase();
         let matches = |job: &Job| {
@@ -601,7 +577,7 @@ impl App {
             .visible_jobs()
             .get(self.selected_job_index)
             .map(|job| (*job).clone());
-        // A different job is now selected, so its inline panels start at the top.
+        // New selection resets the inline panel scroll.
         self.details_scroll = 0;
         self.logs_scroll = 0;
     }
@@ -633,8 +609,7 @@ impl App {
         self.reset_selection_to_top();
     }
 
-    /// Pin or unpin the selected job. The selection follows the job by id so it
-    /// stays put even though pinning reorders the list.
+    /// Pin/unpin the selected job; selection follows it through the reorder.
     pub fn toggle_pin(&mut self) {
         let Some(id) = self.selected_job.as_ref().map(|job| job.job_id.clone()) else {
             return;
@@ -645,15 +620,13 @@ impl App {
         self.sync_selection(Some(&id));
     }
 
-    /// Snap the selection back to the first visible row. Used when the filter
-    /// changes the list out from under the old index.
+    /// Snap selection to the first visible row.
     fn reset_selection_to_top(&mut self) {
         self.selected_job_index = 0;
         self.update_selected_job();
     }
 
-    /// Left/Right move between the two columns. The left column is just the
-    /// Jobs list; the right column is the Details/Logs stack.
+    /// Left/Right move between the Jobs column and the Details/Logs stack.
     pub fn focus_left(&mut self) {
         self.focus = FocusPanel::Jobs;
     }
@@ -693,8 +666,7 @@ impl App {
         }
     }
 
-    /// Zoom the focused pane to fullscreen. Snapshots the selected job so a
-    /// refresh can't swap content out from under Details/Logs.
+    /// Zoom the focused pane to fullscreen.
     pub fn open_fullscreen(&mut self) {
         if self.selected_job.is_some() {
             self.fullscreen_job = self.selected_job.clone();
@@ -725,35 +697,40 @@ impl App {
         self.log_follow = true;
     }
 
-    /// Enter the plain-text copy view for the current log. Reachable from the
-    /// fullscreen Logs view or from the inline Logs pane when it has focus. The
-    /// event loop releases mouse capture while this state is active so the
-    /// terminal's native selection works.
-    pub fn enter_log_copy(&mut self) {
-        if self.fullscreen_job.is_none() {
-            // Coming from the inline pane: snapshot the selected job and show
-            // the newest lines.
-            let Some(job) = self.selected_job.clone() else {
-                return;
-            };
-            self.fullscreen_job = Some(job);
-            self.log_follow = true;
-        }
-        self.log_copy_origin = self.state;
-        self.state = AppState::LogCopy;
+    /// Open the raw view for the selected (or fullscreened) job's log.
+    pub fn open_raw_log_for_job(&mut self) {
+        let job = self.fullscreen_job.clone().or_else(|| self.selected_job.clone());
+        let Some(job) = job else {
+            return;
+        };
+        self.enter_raw_log(SlurmParser::get_job_log_paths(&job));
     }
 
-    pub fn exit_log_copy(&mut self) {
-        self.state = self.log_copy_origin;
-        // If we synthesised the fullscreen job to get here, drop it again.
-        if self.log_copy_origin == AppState::Normal {
-            self.fullscreen_job = None;
-        }
+    /// Open the raw view for the open History job's log.
+    pub fn open_raw_log_for_history(&mut self) {
+        let Some(detail) = self.history_detail.as_ref() else {
+            return;
+        };
+        let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.job_id);
+        self.enter_raw_log(paths);
     }
 
-    /// Re-resolve the selection after the job list changes. Follows the
-    /// previously selected job by id if it still exists, otherwise clamps
-    /// the index so it stays in bounds.
+    /// Show `paths` in the raw view (mouse capture is released for selection).
+    fn enter_raw_log(&mut self, paths: Vec<String>) {
+        if paths.is_empty() {
+            return;
+        }
+        self.raw_log_paths = paths;
+        self.raw_log_origin = self.state;
+        self.log_follow = true;
+        self.state = AppState::RawLog;
+    }
+
+    pub fn exit_raw_log(&mut self) {
+        self.state = self.raw_log_origin;
+    }
+
+    /// Re-resolve selection after the list changes, following the job by id.
     pub fn sync_selection(&mut self, previous_id: Option<&str>) {
         let visible = self.visible_jobs();
         let followed = previous_id.and_then(|id| visible.iter().position(|j| j.job_id == id));
@@ -919,33 +896,31 @@ mod tests {
     }
 
     #[test]
-    fn log_copy_from_inline_snapshots_job_and_returns_to_normal() {
+    fn raw_log_from_inline_collects_paths_and_returns_to_normal() {
         let mut app = app_with_jobs(vec![job("1", "a")]);
         app.update_selected_job();
         app.focus = FocusPanel::Logs;
 
-        app.enter_log_copy();
-        assert_eq!(app.state, AppState::LogCopy);
-        assert!(app.fullscreen_job.is_some(), "snapshots the selected job");
+        app.open_raw_log_for_job();
+        assert_eq!(app.state, AppState::RawLog);
+        assert!(!app.raw_log_paths.is_empty(), "collects candidate log paths");
 
-        app.exit_log_copy();
+        app.exit_raw_log();
         assert_eq!(app.state, AppState::Normal);
-        assert!(app.fullscreen_job.is_none(), "synthetic snapshot is dropped");
     }
 
     #[test]
-    fn log_copy_from_fullscreen_returns_to_fullscreen() {
+    fn raw_log_returns_to_the_state_it_came_from() {
         let mut app = app_with_jobs(vec![job("1", "a")]);
         app.fullscreen_job = Some(job("1", "a"));
         app.fullscreen_panel = FocusPanel::Logs;
         app.state = AppState::Fullscreen;
 
-        app.enter_log_copy();
-        assert_eq!(app.state, AppState::LogCopy);
+        app.open_raw_log_for_job();
+        assert_eq!(app.state, AppState::RawLog);
 
-        app.exit_log_copy();
+        app.exit_raw_log();
         assert_eq!(app.state, AppState::Fullscreen, "returns to where it came from");
-        assert!(app.fullscreen_job.is_some(), "fullscreen job is kept");
     }
 
     #[test]

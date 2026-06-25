@@ -51,8 +51,8 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         return;
     }
 
-    if app.state == AppState::LogCopy {
-        render_log_copy(frame, app, frame.area());
+    if app.state == AppState::RawLog {
+        render_raw_log(frame, app, frame.area());
         return;
     }
 
@@ -125,11 +125,8 @@ fn render_jobs_dashboard(frame: &mut Frame, app: &App, area: Rect) {
     render_job_logs(frame, app, rects.logs);
 }
 
-/// The tab strip, sat inline at the right of the status bar. The active tab
-/// gets a filled accent pill; the rest sit muted. Returns the spans and their
-/// display width so the caller can reserve exactly that much room on the right.
-/// The width stays constant regardless of state, so the right-aligned tabs
-/// never shift (the refresh spinner lives on the left, not here).
+/// The tab strip for the right of the status bar. Returns the spans and their
+/// width. The width is constant so the right-aligned tabs never shift.
 fn tab_strip(app: &App) -> (Vec<Span<'static>>, u16) {
     let mut spans = Vec::new();
 
@@ -154,16 +151,12 @@ fn tab_strip(app: &App) -> (Vec<Span<'static>>, u16) {
     (spans, width)
 }
 
-/// The text of one tab pill, shared by the renderer and the hit-test so their
-/// widths can never disagree.
+/// One tab pill's text, shared by the renderer and the hit-test.
 fn tab_cell(i: usize, tab: &ActiveTab) -> String {
     format!(" {} {} ", i + 1, tab.title())
 }
 
-/// Screen rect of each clickable tab. Mirrors the geometry in
-/// `render_status_bar`: the status bar is the first row and the tab strip is
-/// right-aligned within it. Labels don't depend on app state, so the area is
-/// all this needs.
+/// Screen rect of each clickable tab, mirroring `render_status_bar`'s geometry.
 pub struct TabRects {
     rects: Vec<(ActiveTab, Rect)>,
 }
@@ -219,8 +212,7 @@ fn tab_is_loading(app: &App) -> bool {
     }
 }
 
-/// Layout of the dashboard's main content area. The single source of truth so
-/// rendering and mouse hit-testing can never drift apart.
+/// Layout of the dashboard's main content area, shared by render and hit-test.
 pub struct PanelRects {
     pub jobs: Rect,
     pub right_header: Rect,
@@ -244,8 +236,7 @@ impl PanelRects {
     }
 }
 
-/// Split the main area into the panels. Used by `render_app` to draw and by the
-/// mouse handler to map a click back to a panel.
+/// Split the main area into the dashboard panels.
 pub fn panel_rects(area: Rect) -> PanelRects {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -272,9 +263,7 @@ pub fn panel_rects(area: Rect) -> PanelRects {
     }
 }
 
-/// A header card at the top of the right column carrying the selected job's
-/// name as a highlighted pill. Boxed so it aligns with the Jobs panel's top
-/// edge and reads as a deliberate header rather than a shifted-down title.
+/// The selected job's name as a header pill above the right column.
 fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -463,8 +452,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(List::new(jobs), list_row, &mut state);
 }
 
-/// The live filter line shown above the job list. While typing it carries a
-/// cursor; once applied it stays as a muted reminder with how to clear it.
+/// The live filter line above the job list.
 fn filter_line(app: &App) -> Line<'static> {
     let typing = app.state == AppState::FilterInput;
     let accent = if typing { theme::ACCENT } else { theme::MUTED };
@@ -538,15 +526,13 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Clamp a stored scroll offset to the last useful line given the viewport
-/// height, so over-scrolling past the end of the text is a no-op.
+/// Clamp a scroll offset so over-scrolling past the end is a no-op.
 fn clamp_scroll(offset: u16, total_lines: usize, viewport: u16) -> u16 {
     let max = (total_lines as u16).saturating_sub(viewport);
     offset.min(max)
 }
 
-/// A non-log message in the Logs panel, styled so it doesn't read as log
-/// output: centered and muted italic.
+/// A centered, muted message in place of log output.
 fn render_placeholder(frame: &mut Frame, block: Block<'static>, area: Rect, message: &str) {
     let body = vec![
         Line::from(""),
@@ -601,9 +587,9 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
             &[("esc", "close"), ("Enter", "submit")]
         }
         AppState::Fullscreen => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
-        AppState::HistoryDetail => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
+        AppState::HistoryDetail => &[("esc", "back"), ("↑↓", "scroll"), ("y", "raw"), ("q", "quit")],
         AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
-        AppState::LogCopy => &[("select", "copy"), ("↑↓", "scroll"), ("esc", "exit")],
+        AppState::RawLog => &[("↑↓", "scroll"), ("esc", "exit")],
     };
 
     let help = Paragraph::new(hint_line(pairs)).block(
@@ -628,9 +614,7 @@ fn hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Braille beads for the node/partition load bars. `FILL` is a dense,
-/// slightly-perforated glyph so filled segments read as a textured ribbon rather
-/// than a solid block; `TRACK` is a faint dotted midline for the empty remainder.
+/// Braille beads for the node/partition load bars: filled, then dim track.
 const BAR_FILL: &str = "⠿";
 const BAR_TRACK: &str = "⠒";
 
@@ -744,7 +728,7 @@ fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
             ("esc", "back"),
             ("↑↓", "scroll"),
             ("G", "follow"),
-            ("y", "copy"),
+            ("y", "raw"),
             ("q", "quit"),
         ],
     };
@@ -863,33 +847,27 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Plain, borderless log view for copying. Mouse capture is off while this is
-/// shown (see `run_event_loop`), so the terminal's own selection works. No
-/// border, no wrap: each screen row is exactly one log line, which keeps a
-/// drag-selection clean and free of injected line breaks.
-fn render_log_copy(frame: &mut Frame, app: &App, area: Rect) {
+/// Plain, borderless, no-wrap log view so a terminal selection stays clean
+/// (one screen row per log line). Mouse capture is released in the event loop.
+fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
 
-    let Some(job) = app.fullscreen_job.as_ref() else {
-        return;
-    };
-
     let mut header = vec![Span::styled(
-        " COPY ",
+        " RAW ",
         Style::default()
             .bg(theme::ACCENT_PINK)
             .fg(theme::BADGE_FG)
             .add_modifier(Modifier::BOLD),
     )];
 
-    match read_tail_for_job(job, TAIL_BYTES) {
+    match read_tail_for_paths(app.raw_log_paths.clone(), TAIL_BYTES) {
         LogRead::Lines { path, text } => {
             header.push(Span::styled(format!("  {path}"), Style::default().fg(theme::MUTED)));
             header.push(Span::styled(
-                "   select text to copy, esc to exit",
+                "   esc to exit",
                 Style::default().fg(theme::DIM_BORDER),
             ));
             frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
@@ -920,7 +898,7 @@ fn render_log_copy(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// A titled panel with a column header and a selectable, scrolling list.
-/// `message` replaces the list when present, used for loading / error / empty.
+/// `message` replaces the list for loading / error / empty.
 fn render_cluster_list(
     frame: &mut Frame,
     title: &str,
@@ -971,8 +949,7 @@ fn render_cluster_list(
     frame.render_stateful_widget(List::new(items), rows[1], &mut state);
 }
 
-/// Pick the loading / error / empty message for a cluster list, or `None` when
-/// there are rows to show.
+/// The loading / error / empty message for a cluster list, or `None` if it has rows.
 fn cluster_message<'a>(
     loading: bool,
     error: &'a Option<String>,
@@ -1005,8 +982,7 @@ fn row_base(selected: bool) -> (Span<'static>, Style) {
     (rail, base)
 }
 
-/// A short braille bar showing `filled` of `total` in `color`, padded out with
-/// the dim track. Mirrors the Summary panel's proportion bar at list scale.
+/// A short braille bar showing `filled` of `total` in `color`.
 fn mini_bar(filled: usize, total: usize, width: usize, color: ratatui::style::Color) -> Vec<Span<'static>> {
     let cells = if total == 0 {
         0
@@ -1211,8 +1187,7 @@ fn acct_state_color(state: &str, exit_code: &str) -> ratatui::style::Color {
     }
 }
 
-/// The fullscreen detail for a finished job: rich sacct fields up top, a
-/// best-effort log tail below.
+/// The fullscreen History detail: sacct fields up top, best-effort log below.
 fn render_history_detail(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -1250,7 +1225,7 @@ fn render_history_detail(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let hints: &[(&str, &str)] = &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")];
+    let hints: &[(&str, &str)] = &[("esc", "back"), ("↑↓", "scroll"), ("y", "raw"), ("q", "quit")];
     frame.render_widget(Paragraph::new(hint_line(hints)), rows[3]);
 }
 
@@ -1352,8 +1327,6 @@ fn render_history_detail_logs(frame: &mut Frame, app: &App, detail: &AcctDetail,
             );
         }
         LogRead::Empty(_) => render_placeholder(frame, block, area, "This job's log is empty"),
-        // For a finished job, "not found" usually means custom --output naming
-        // or the file was cleaned up, so be explicit about it being best-effort.
         LogRead::Missing(_) => {
             render_placeholder(frame, block, area, "No log file found for this job")
         }

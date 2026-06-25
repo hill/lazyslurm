@@ -7,8 +7,7 @@ use crate::models::{AcctDetail, AcctEntry, Job, JobState, Node, Partition};
 
 pub struct SlurmParser;
 
-/// Parse SLURM's `allocated/idle/other/total` quadruple (the `%C` and `%F`
-/// sinfo fields). Missing or unparseable parts fall back to zero.
+/// Parse an `allocated/idle/other/total` quadruple. Missing parts fall to zero.
 fn parse_aiot(field: &str) -> (u32, u32, u32, u32) {
     let mut parts = field.split('/');
     let mut next = || parts.next().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
@@ -192,10 +191,8 @@ impl SlurmParser {
         paths
     }
 
-    /// Candidate log paths for a finished job. SLURM doesn't store output, and
-    /// `scontrol` has forgotten the job, so this can only guess SLURM's default
-    /// naming under the recorded WorkDir. Best-effort: a job that used a custom
-    /// `--output` path won't be found here.
+    /// Best-effort default log paths for a finished job. A job that used a
+    /// custom `--output` path won't be found here.
     pub fn get_acct_log_paths(work_dir: &str, job_id: &str) -> Vec<String> {
         let mut paths = Vec::new();
         if !work_dir.is_empty() {
@@ -207,9 +204,8 @@ impl SlurmParser {
         paths
     }
 
-    /// Parse `sinfo -N -o "%n|%T|%C|%m|%e|%G|%P"`. A node spanning several
-    /// partitions shows up once per partition, so we fold the repeats into a
-    /// single entry and join the partition names.
+    /// Parse `sinfo -N`. A node spanning several partitions is folded into one
+    /// row with the partition names joined.
     pub fn parse_sinfo_nodes(output: &str) -> Vec<Node> {
         let mut nodes: Vec<Node> = Vec::new();
 
@@ -319,10 +315,8 @@ impl SlurmParser {
         entries
     }
 
-    /// Parse `sacct -j <id>` detail (17 pipe-delimited fields). The allocation
-    /// row (`JobID` == `job_id`) supplies most fields; MaxRSS only appears on
-    /// the step rows (`<id>.batch`, `<id>.0`, ...), so we fold in the largest
-    /// across every row. Returns `None` if the allocation row is missing.
+    /// Parse `sacct -j` detail. The largest MaxRSS across the step rows is
+    /// folded in. `None` if the allocation row is missing.
     pub fn parse_sacct_detail(output: &str, job_id: &str) -> Option<AcctDetail> {
         let mut detail: Option<AcctDetail> = None;
         let mut max_rss_bytes = 0u64;
@@ -371,8 +365,7 @@ impl SlurmParser {
     }
 }
 
-/// Parse a sacct memory figure like `2072K`, `1.50G`, or `512M` into bytes for
-/// comparison. Returns `None` for empty or unrecognised values.
+/// Parse a sacct memory figure (`2072K`, `1.5G`) into bytes.
 fn parse_mem_to_bytes(value: &str) -> Option<u64> {
     let v = value.trim();
     if v.is_empty() {

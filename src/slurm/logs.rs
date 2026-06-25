@@ -1,7 +1,3 @@
-//! Bounded log reading for the job log panels. Reads only the tail of a file
-//! by seeking from the end, so a multi-gigabyte log never gets pulled into
-//! memory just to show the last screenful.
-
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -11,17 +7,13 @@ use crate::slurm::SlurmParser;
 /// Size of the window read from the end of a log file.
 pub const TAIL_BYTES: u64 = 256 * 1024;
 
-/// Outcome of trying to read a job's log, so the renderer can tell apart
-/// "here is the text", "the file is there but empty", and "nothing found".
 pub enum LogRead {
     Lines { path: String, text: String },
     Empty(String),
     Missing(Vec<String>),
 }
 
-/// Read the last `max_bytes` of a file. When the file is larger than the
-/// window the first (partial) line is dropped so we never show a torn line.
-/// Returns `None` if the file can't be opened or read.
+/// Tail the last `max_bytes`. A torn first line is dropped when windowed.
 pub fn tail_file(path: &str, max_bytes: u64) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -37,8 +29,7 @@ pub fn tail_file(path: &str, max_bytes: u64) -> Option<String> {
 
     let text = String::from_utf8_lossy(&buf).into_owned();
 
-    // We seeked into the middle of a line, so drop everything up to and
-    // including the first newline.
+    // Seeked mid-line: drop up to the first newline.
     if window < len
         && let Some(nl) = text.find('\n')
     {
@@ -53,9 +44,7 @@ pub fn read_tail_for_job(job: &Job, max_bytes: u64) -> LogRead {
     read_tail_for_paths(SlurmParser::get_job_log_paths(job), max_bytes)
 }
 
-/// Tail the first of `paths` that reads. Shared by the live Jobs view and the
-/// History detail view, which reconstructs its paths from sacct's WorkDir since
-/// a finished job no longer has a `scontrol` StdOut to point at.
+/// Tail the first of `paths` that reads.
 pub fn read_tail_for_paths(paths: Vec<String>, max_bytes: u64) -> LogRead {
     for path in &paths {
         match tail_file(path, max_bytes) {

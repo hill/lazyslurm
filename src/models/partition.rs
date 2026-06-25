@@ -1,12 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-/// A partition (queue) as reported by `sinfo -s`. Node counts come from the
-/// `%F` field in allocated/idle/other/total form.
+/// A partition from `sinfo -s`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Partition {
     pub name: String,
-    /// SLURM marks the default partition with a trailing `*`; we strip it and
-    /// record it here instead.
+    /// Default partition (sinfo marks it with a trailing `*`).
     pub is_default: bool,
     pub availability: String,
     pub nodes_alloc: u32,

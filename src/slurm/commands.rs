@@ -65,8 +65,7 @@ impl SlurmExecutor for SlurmProcess {
     }
 
     async fn sinfo_nodes(&self) -> Result<String> {
-        // %n host, %T state, %C cpus A/I/O/T, %m memory, %e free mem,
-        // %G gres, %P partition. Pipe-delimited so names with spaces survive.
+        // host|state|cpus A/I/O/T|memory|free mem|gres|partition
         let output = TokioCommand::new("sinfo")
             .args(["-h", "-N", "-o", "%n|%T|%C|%m|%e|%G|%P"])
             .output()
@@ -82,7 +81,7 @@ impl SlurmExecutor for SlurmProcess {
     }
 
     async fn sinfo_partitions(&self) -> Result<String> {
-        // %P partition, %a availability, %F nodes A/I/O/T, %l time limit.
+        // partition|availability|nodes A/I/O/T|time limit
         let output = TokioCommand::new("sinfo")
             .args(["-h", "-s", "-o", "%P|%a|%F|%l"])
             .output()
@@ -121,8 +120,7 @@ impl SlurmExecutor for SlurmProcess {
     }
 
     async fn sacct_job(&self, job_id: &str) -> Result<String> {
-        // No -X here: the allocation row carries most fields but MaxRSS only
-        // shows up on the per-step rows, so we need them too.
+        // No -X: MaxRSS only appears on the per-step rows.
         let output = TokioCommand::new("sacct")
             .args([
                 "-j",

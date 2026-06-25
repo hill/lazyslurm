@@ -22,20 +22,19 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::Fullscreen => event_fullscreen(app, key),
         AppState::HistoryDetail => event_history_detail(app, key),
         AppState::FilterInput => event_filter_input(app, key),
-        AppState::LogCopy => event_log_copy(app, key),
+        AppState::RawLog => event_raw_log(app, key),
     }
 }
 
-/// Plain-text copy view. Mouse capture is released (see `run_event_loop`), so
-/// the terminal handles selection; here we just scroll and exit.
-fn event_log_copy(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+/// Raw log view; scroll and exit (mouse capture is released for selection).
+fn event_raw_log(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     const PAGE: u16 = 10;
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
         (KeyCode::Esc, _)
         | (KeyCode::Char('q'), _)
         | (KeyCode::Char('Q'), _)
-        | (KeyCode::Char('y'), _) => app.exit_log_copy(),
+        | (KeyCode::Char('y'), _) => app.exit_raw_log(),
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.fullscreen_scroll_up(1),
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.fullscreen_scroll_down(1),
         (KeyCode::PageUp, _) => app.fullscreen_scroll_up(PAGE),
@@ -45,8 +44,7 @@ fn event_log_copy(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Er
     Ok(None)
 }
 
-/// Live filter typing. Every keystroke re-filters the in-memory list, so it is
-/// instant. Esc drops the filter; Enter keeps it and returns to navigation.
+/// Live filter typing; every keystroke re-filters the in-memory list.
 fn event_filter_input(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
@@ -70,6 +68,7 @@ fn event_history_detail(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.history_detail_scroll_down(1),
         (KeyCode::PageUp, _) => app.history_detail_scroll_up(PAGE),
         (KeyCode::PageDown, _) => app.history_detail_scroll_down(PAGE),
+        (KeyCode::Char('y'), _) => app.open_raw_log_for_history(),
         _ => {}
     }
     Ok(None)
@@ -177,12 +176,11 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('P'), _) if app.active_tab == ActiveTab::Jobs => {
             app.toggle_pin();
         }
-        // Copy the selected job's log: open the plain-text view from the
-        // focused inline Logs pane.
+        // Open the raw log view from the focused inline Logs pane.
         (KeyCode::Char('y'), _)
             if app.active_tab == ActiveTab::Jobs && app.focus == FocusPanel::Logs =>
         {
-            app.enter_log_copy();
+            app.open_raw_log_for_job();
         }
         _ => {}
     }
@@ -206,7 +204,7 @@ fn event_fullscreen(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn 
         (KeyCode::PageDown, _) => app.fullscreen_scroll_down(PAGE),
         (KeyCode::Char('G'), _) | (KeyCode::Char('g'), _) => app.fullscreen_follow(),
         (KeyCode::Char('y'), _) if app.fullscreen_panel == FocusPanel::Logs => {
-            app.enter_log_copy();
+            app.open_raw_log_for_job();
         }
         _ => {}
     }
@@ -256,14 +254,13 @@ pub async fn run_event_loop(
 ) -> Result<(), Box<dyn Error>> {
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
-    // Track mouse capture so we can release it for the copy view (letting the
-    // terminal handle text selection) and restore it on the way back.
+    // Release mouse capture for the raw view so the terminal can select.
     let mut mouse_captured = true;
 
     loop {
         app.drain_events();
 
-        let want_capture = app.state != AppState::LogCopy;
+        let want_capture = app.state != AppState::RawLog;
         if want_capture != mouse_captured {
             if want_capture {
                 execute!(terminal.backend_mut(), EnableMouseCapture)?;
@@ -305,9 +302,7 @@ pub async fn run_event_loop(
     }
 }
 
-/// Click a tab to switch to it, click a panel to focus it, wheel to scroll the
-/// focused panel. Reuses `tab_rects`/`panel_rects` so the hit-testing can't
-/// drift from what's drawn.
+/// Click a tab or panel to focus it, wheel to scroll. Reuses the rect helpers.
 fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
     if app.state != AppState::Normal {
         return;
@@ -321,8 +316,8 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
         return;
     }
 
-    // Panel hit-testing and the focus model only exist on the Jobs dashboard.
-    // On the cluster tabs the wheel just moves the list selection.
+    // Panels and focus only exist on the Jobs dashboard; elsewhere the wheel
+    // moves the list selection.
     if app.active_tab != ActiveTab::Jobs {
         match mouse.kind {
             MouseEventKind::ScrollDown => app.list_next(),
