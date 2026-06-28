@@ -1,0 +1,17 @@
+JobId=48220 JobName=big_matrix
+   UserId=bob(1001) GroupId=ml-lab(2000) MCS_label=N/A
+   Priority=512 Nice=0 Account=ml-lab QOS=low
+   JobState=PENDING Reason=Resources Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:00 TimeLimit=2-00:00:00 TimeMin=N/A
+   SubmitTime=2026-06-28T09:15:00 EligibleTime=2026-06-28T09:15:00
+   AccrueTime=2026-06-28T09:15:00
+   StartTime=Unknown EndTime=Unknown Deadline=N/A
+   Partition=bigmem
+   NodeList=(null)
+   NumNodes=1 NumCPUs=1 NumTasks=1 CPUs/Task=1
+   MinCPUsNode=1 MinMemoryNode=64G MinTmpDiskNode=0
+   TRES=cpu=1,mem=64G,node=1
+   WorkDir=/home/bob
+   StdErr=/home/bob/slurm-48220.err
+   StdOut=/home/bob/slurm-48220.out

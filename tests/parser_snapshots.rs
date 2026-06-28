@@ -88,3 +88,59 @@ async fn fixture_scancel_records_calls() {
     let cancelled = exec.cancelled.lock().unwrap().clone();
     assert_eq!(cancelled, vec!["12345", "12347"]);
 }
+
+// The "cluster" fixture stands in for a realistic multi-user cluster: several
+// users and accounts, multiple partitions, QOS tiers, fake GPUs, a job array,
+// a dependency, and a spread of finished-job states for the History tab.
+
+#[tokio::test]
+async fn parse_squeue_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.squeue(None, None).await.unwrap();
+    let jobs = SlurmParser::parse_squeue_output(&raw).unwrap();
+    insta::assert_yaml_snapshot!(jobs);
+}
+
+#[tokio::test]
+async fn parse_sinfo_nodes_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.sinfo_nodes().await.unwrap();
+    let nodes = SlurmParser::parse_sinfo_nodes(&raw);
+    insta::assert_yaml_snapshot!(nodes);
+}
+
+#[tokio::test]
+async fn parse_sinfo_partitions_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.sinfo_partitions().await.unwrap();
+    let partitions = SlurmParser::parse_sinfo_partitions(&raw);
+    insta::assert_yaml_snapshot!(partitions);
+}
+
+#[tokio::test]
+async fn parse_sacct_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.sacct(None).await.unwrap();
+    let entries = SlurmParser::parse_sacct(&raw);
+    insta::assert_yaml_snapshot!(entries);
+}
+
+#[tokio::test]
+async fn parse_sacct_detail_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.sacct_job("48100").await.unwrap();
+    let detail = SlurmParser::parse_sacct_detail(&raw, "48100");
+    insta::assert_yaml_snapshot!(detail);
+}
+
+#[tokio::test]
+async fn parse_scontrol_cluster_gpu_job() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.scontrol_show_job("48201").await.unwrap();
+    let mut fields: Vec<(String, String)> = SlurmParser::parse_scontrol_output(&raw)
+        .unwrap()
+        .into_iter()
+        .collect();
+    fields.sort_by(|a, b| a.0.cmp(&b.0));
+    insta::assert_yaml_snapshot!(fields);
+}

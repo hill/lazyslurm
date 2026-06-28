@@ -1,0 +1,46 @@
+---
+source: tests/parser_snapshots.rs
+expression: entries
+---
+- job_id: "48100"
+  name: train_resnet
+  state: COMPLETED
+  exit_code: "0:0"
+  elapsed: "05:12:44"
+  start: "2026-06-27T20:01:10"
+  end: "2026-06-28T01:13:54"
+- job_id: "48101"
+  name: eval_bert
+  state: FAILED
+  exit_code: "1:0"
+  elapsed: "00:02:31"
+  start: "2026-06-28T02:00:00"
+  end: "2026-06-28T02:02:31"
+- job_id: "48102"
+  name: hyperopt
+  state: TIMEOUT
+  exit_code: "0:1"
+  elapsed: "1-00:00:00"
+  start: "2026-06-27T03:00:00"
+  end: "2026-06-28T03:00:00"
+- job_id: "48103"
+  name: big_matrix
+  state: OUT_OF_MEMORY
+  exit_code: "0:125"
+  elapsed: "00:14:02"
+  start: "2026-06-28T04:00:00"
+  end: "2026-06-28T04:14:02"
+- job_id: "48104"
+  name: smoke_test
+  state: CANCELLED+
+  exit_code: "0:0"
+  elapsed: "00:00:46"
+  start: "2026-06-28T05:00:00"
+  end: "2026-06-28T05:00:46"
+- job_id: "48105"
+  name: preprocess
+  state: COMPLETED
+  exit_code: "0:0"
+  elapsed: "00:33:09"
+  start: "2026-06-28T06:00:00"
+  end: "2026-06-28T06:33:09"

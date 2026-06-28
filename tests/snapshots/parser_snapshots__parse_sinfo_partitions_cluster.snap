@@ -1,0 +1,44 @@
+---
+source: tests/parser_snapshots.rs
+expression: partitions
+---
+- name: debug
+  is_default: true
+  availability: up
+  nodes_alloc: 0
+  nodes_idle: 1
+  nodes_other: 0
+  nodes_total: 1
+  time_limit: "30:00"
+- name: cpu
+  is_default: false
+  availability: up
+  nodes_alloc: 3
+  nodes_idle: 1
+  nodes_other: 1
+  nodes_total: 5
+  time_limit: "2-00:00:00"
+- name: gpu
+  is_default: false
+  availability: up
+  nodes_alloc: 2
+  nodes_idle: 1
+  nodes_other: 0
+  nodes_total: 3
+  time_limit: "1-00:00:00"
+- name: bigmem
+  is_default: false
+  availability: up
+  nodes_alloc: 0
+  nodes_idle: 1
+  nodes_other: 0
+  nodes_total: 1
+  time_limit: "2-00:00:00"
+- name: long
+  is_default: false
+  availability: up
+  nodes_alloc: 0
+  nodes_idle: 0
+  nodes_other: 1
+  nodes_total: 1
+  time_limit: "7-00:00:00"

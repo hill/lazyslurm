@@ -1,0 +1,21 @@
+---
+source: tests/parser_snapshots.rs
+expression: detail
+---
+job_id: "48100"
+name: train_resnet
+user: alice
+account: ml-lab
+partition: gpu
+node_list: gpu-node-01
+alloc_cpus: "8"
+req_mem: 32Gn
+max_rss: 18.4G
+total_cpu: "4-04:12:00"
+state: COMPLETED
+exit_code: "0:0"
+submit: "2026-06-27T20:00:55"
+start: "2026-06-27T20:01:10"
+end: "2026-06-28T01:13:54"
+elapsed: "05:12:44"
+work_dir: /home/alice/runs/resnet

@@ -1,0 +1,13 @@
+JOBID,NAME,USER,ST,TIME,NODELIST,PARTITION
+48201,train_resnet,alice,R,1:42:09,gpu-node-01,gpu
+48202,train_bert,bob,PD,0:00,(null),gpu
+48210_1,sweep,carol,R,12:04,gpu-node-03,gpu
+48210_2,sweep,carol,PD,0:00,(null),gpu
+48210_3,sweep,carol,PD,0:00,(null),gpu
+48210_4,sweep,carol,PD,0:00,(null),gpu
+48215,preprocess,alice,R,4:20,cpu-node-01,cpu
+48221,low_prio_sim,carol,R,8:11,cpu-node-02,cpu
+48220,big_matrix,bob,PD,0:00,(null),bigmem
+48230,stage1,alice,R,0:33,cpu-node-01,cpu
+48231,stage2,alice,PD,0:00,(null),cpu
+48240,smoke_test,dave,R,0:05,cpu-node-01,debug

@@ -139,6 +139,12 @@ cargo run
 
 # Submit some test jobs
 just slurm_populate
+
+# Inspect the cluster
+just slurm_status    # squeue + sinfo
+just slurm_prio      # sprio priority breakdown
+just slurm_share     # sshare fairshare usage
+just slurm_clear_jobs
 ```
 
 Your source is mounted into the container, so changes are picked up immediately.

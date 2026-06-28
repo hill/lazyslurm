@@ -1,0 +1,10 @@
+cpu-node-01|mixed|18/14/0/32|192000|90000|(null)|cpu
+cpu-node-01|mixed|18/14/0/32|192000|90000|(null)|debug
+cpu-node-02|allocated|32/0/0/32|192000|2000|(null)|cpu
+cpu-node-03|idle|0/32/0/32|192000|188000|(null)|cpu
+gpu-node-01|mixed|16/16/0/32|512000|220000|gpu:a100:4|gpu
+gpu-node-02|allocated|32/0/0/32|512000|8000|gpu:a100:4|gpu
+gpu-node-03|mixed|8/24/0/32|512000|300000|gpu:h100:8|gpu
+bigmem-node-01|idle|0/64/0/64|2048000|2040000|(null)|bigmem
+drain-node-01|drained|0/0/32/32|192000|190000|(null)|cpu
+down-node-01|down|0/0/32/32|192000|0|(null)|long

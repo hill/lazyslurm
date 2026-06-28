@@ -1,0 +1,19 @@
+JobId=48201 JobName=train_resnet
+   UserId=alice(1000) GroupId=ml-lab(2000) MCS_label=N/A
+   Priority=18472 Nice=0 Account=ml-lab QOS=high
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=01:42:09 TimeLimit=1-00:00:00 TimeMin=N/A
+   SubmitTime=2026-06-28T08:00:00 EligibleTime=2026-06-28T08:00:00
+   AccrueTime=2026-06-28T08:00:00
+   StartTime=2026-06-28T08:00:01 EndTime=2026-06-29T08:00:01 Deadline=N/A
+   Partition=gpu
+   NodeList=gpu-node-01
+   BatchHost=gpu-node-01
+   NumNodes=1 NumCPUs=2 NumTasks=2 CPUs/Task=1
+   MinCPUsNode=2 MinMemoryNode=2G MinTmpDiskNode=0
+   TRES=cpu=2,mem=2G,node=1,gres/gpu=1
+   Gres=gpu:1
+   WorkDir=/home/alice/runs/resnet
+   StdErr=/home/alice/runs/resnet/slurm-48201.err
+   StdOut=/home/alice/runs/resnet/slurm-48201.out

@@ -26,19 +26,29 @@ slurm_up:
 slurm_shell:
     docker exec -it lazyslurm_dev bash
 
-# Submit test jobs from host
+# Submit the job zoo (multiple users, partitions, QOS, GPUs, array, deps)
 slurm_populate:
-    @echo "Submitting test jobs..."
-    docker exec lazyslurm_dev sbatch --wrap="echo 'Starting job 1...'; i=1; while [ \$i -le 30 ]; do echo 'Job 1 progress: step '\$i'/30'; sleep 2; i=\$((i+1)); done; echo 'Job 1 completed!'" --job-name=test_job_1 --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
-    docker exec lazyslurm_dev sbatch --wrap="echo 'Starting long job...'; i=1; while [ \$i -le 60 ]; do echo 'Long job processing batch '\$i'/60'; sleep 2; i=\$((i+1)); done; echo 'Long job finished!'" --job-name=long_job --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
-    docker exec lazyslurm_dev sbatch --wrap="echo 'Quick job starting...'; i=1; while [ \$i -le 15 ]; do echo 'Quick task '\$i'/15 complete'; sleep 1; i=\$((i+1)); done; echo 'Quick job done!'" --job-name=quick_job --output=/tmp/slurm-%j.out --error=/tmp/slurm-%j.err
-    @echo "Jobs submitted!"
+    docker exec lazyslurm_dev bash /workspace/dev/populate.sh
+
+# Cancel every queued/running job, then clear any drain a kill leaves behind
+# (accounting history is kept)
+slurm_clear_jobs:
+    docker exec lazyslurm_dev bash -c 'ids=$(squeue -h -o %i | tr "\n" " "); [ -n "$ids" ] && scancel $ids; true'
+    docker exec lazyslurm_dev scontrol update NodeName=slurmctld State=RESUME || true
 
 # Check SLURM status
 slurm_status:
-    docker exec lazyslurm_dev squeue
+    docker exec lazyslurm_dev squeue --format="%.8i %.12j %.8u %.8T %.10P %.6q %.12R"
     @echo ""
-    docker exec lazyslurm_dev sinfo
+    docker exec lazyslurm_dev sinfo -o "%P %a %D %C %G"
+
+# Show the scheduler's priority breakdown for queued jobs
+slurm_prio:
+    docker exec lazyslurm_dev sprio -l
+
+# Show fairshare usage per account/user
+slurm_share:
+    docker exec lazyslurm_dev sshare -a
 
 # Stop SLURM environment
 slurm_down:
