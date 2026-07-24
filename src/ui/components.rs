@@ -1070,8 +1070,29 @@ fn node_state_color(node: &Node) -> ratatui::style::Color {
 }
 
 fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
+    // These two columns hold numbers, so they can't be truncated like the
+    // text columns. Size them to the widest value (with the old widths as
+    // minimums) so big CPU/RAM figures keep a space before the next column
+    // instead of merging into it, e.g. "128/1282766G/1511G".
+    let cpu_w = app
+        .nodes
+        .iter()
+        .map(|n| format!("{}/{}", n.cpus_alloc, n.cpus_total).len() + 1)
+        .max()
+        .unwrap_or(0)
+        .max(7);
+    let mem_w = app
+        .nodes
+        .iter()
+        .map(|n| format!("{}/{}", fmt_gb(n.free_mem_mb), fmt_gb(n.memory_mb)).len() + 1)
+        .max()
+        .unwrap_or(0)
+        .max(12);
+    // The CPUS header spans the 6-cell bar plus the value column.
+    let cpu_col = 7 + cpu_w;
+
     let header = format!(
-        "  {:<18}{:<10}{:<14}{:<12}{:<20}PART",
+        "  {:<18}{:<10}{:<cpu_col$}{:<mem_w$}{:<20}PART",
         "NODE", "STATE", "CPUS", "MEM f/t", "GPU"
     );
 
@@ -1098,12 +1119,15 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
                 color,
             ));
             spans.push(Span::styled(
-                format!(" {:<7}", format!("{}/{}", node.cpus_alloc, node.cpus_total)),
+                format!(
+                    " {:<cpu_w$}",
+                    format!("{}/{}", node.cpus_alloc, node.cpus_total)
+                ),
                 base.fg(theme::MUTED),
             ));
             spans.push(Span::styled(
                 format!(
-                    "{:<12}",
+                    "{:<mem_w$}",
                     format!("{}/{}", fmt_gb(node.free_mem_mb), fmt_gb(node.memory_mb))
                 ),
                 base.fg(theme::MUTED),
