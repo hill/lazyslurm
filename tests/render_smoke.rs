@@ -161,6 +161,56 @@ fn nodes_tab_renders_node_row() {
 }
 
 #[test]
+fn nodes_tab_keeps_space_before_mem_with_wide_cpu_values() {
+    // A 128-core node fills the old 7-char CPU column exactly, leaving no
+    // gap before the memory column: "128/1282766G/1511G".
+    let mut app = App::new();
+    app.active_tab = ActiveTab::Nodes;
+    app.nodes = vec![Node {
+        name: "cpu-node-01".into(),
+        state: "allocated".into(),
+        cpus_alloc: 128,
+        cpus_idle: 0,
+        cpus_other: 0,
+        cpus_total: 128,
+        memory_mb: Some(1_547_264),   // 1511G
+        free_mem_mb: Some(2_833_000), // 2766G
+        gres: Some("tmpfs:7T".into()),
+        partition: "cpu".into(),
+    }];
+    let text = rendered_text(&app);
+    assert!(
+        text.contains("128/128 2766G/1511G"),
+        "CPU and MEM columns must not merge, got: {text}"
+    );
+}
+
+#[test]
+fn nodes_tab_keeps_space_before_gpu_with_wide_mem_values() {
+    // A multi-TB node overflows the old 12-char MEM column, merging it with
+    // the GPU column: "11264G/11264Ggpu:a100:4".
+    let mut app = App::new();
+    app.active_tab = ActiveTab::Nodes;
+    app.nodes = vec![Node {
+        name: "fat-node-01".into(),
+        state: "idle".into(),
+        cpus_alloc: 0,
+        cpus_idle: 64,
+        cpus_other: 0,
+        cpus_total: 64,
+        memory_mb: Some(11_534_336), // 11264G
+        free_mem_mb: Some(11_534_336),
+        gres: Some("gpu:a100:4".into()),
+        partition: "gpu".into(),
+    }];
+    let text = rendered_text(&app);
+    assert!(
+        text.contains("11264G/11264G gpu:a100:4"),
+        "MEM and GPU columns must not merge, got: {text}"
+    );
+}
+
+#[test]
 fn partitions_tab_marks_default_and_shows_limit() {
     let mut app = App::new();
     app.active_tab = ActiveTab::Partitions;
