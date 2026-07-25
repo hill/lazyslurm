@@ -1,11 +1,11 @@
 use crate::app::{ActiveTab, App, AppState, FocusPanel};
-use crate::{panel_rects, render_app, tab_rects};
+use crate::{dashboard_rows, panel_rects, render_app, tab_rects};
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     error::Error,
@@ -333,14 +333,7 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
         return;
     }
 
-    let main = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // status bar (title + tabs)
-            Constraint::Min(0),    // panels
-            Constraint::Length(3), // help bar
-        ])
-        .split(area)[1];
+    let main = dashboard_rows(area)[1];
 
     match mouse.kind {
         MouseEventKind::Down(_) => {

@@ -44,6 +44,9 @@ regex = "1.10"
 # Async trait objects
 async-trait = "0.1"
 
+# Resolve the invoking user when $USER isn't exported (e.g. docker exec, cron)
+whoami = "1"
+
 [dev-dependencies]
 # Snapshot testing
 insta = { version = "1.40", features = ["yaml"] }

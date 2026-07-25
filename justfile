@@ -12,8 +12,10 @@ dev:
 # Run lazyslurm inside the SLURM container (for local dev without SLURM).
 # Uses a separate target dir so the container's Linux build never clobbers
 # the host's macOS build artifacts in target/.
+# USER=alice so the default user filter lands on a cluster user with jobs
+# (the container itself runs as root, who submits none).
 dev-docker:
-    docker exec -it -e CARGO_TARGET_DIR=/workspace/target-linux lazyslurm_dev cargo run
+    docker exec -it -e USER=alice -e CARGO_TARGET_DIR=/workspace/target-linux lazyslurm_dev cargo run
 
 # Build and start SLURM development environment
 slurm_up:

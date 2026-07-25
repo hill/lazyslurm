@@ -13,6 +13,18 @@ pub enum LogRead {
     Missing(Vec<String>),
 }
 
+impl LogRead {
+    /// Centered message for a log with no displayable lines. `Lines` never
+    /// reaches this (it renders its own body), so it maps to an empty string.
+    pub fn placeholder_message(&self) -> &'static str {
+        match self {
+            LogRead::Empty(_) => "This job's log is empty",
+            LogRead::Missing(_) => "No log output yet",
+            LogRead::Lines { .. } => "",
+        }
+    }
+}
+
 /// Tail the last `max_bytes`. A torn first line is dropped when windowed.
 pub fn tail_file(path: &str, max_bytes: u64) -> Option<String> {
     let mut file = File::open(path).ok()?;

@@ -107,16 +107,19 @@ impl SlurmParser {
             job.end_time = Self::parse_slurm_time(end_time);
         }
 
-        if let Some(working_dir) = scontrol_fields.get("WorkDir") {
-            job.working_dir = Some(working_dir.clone());
-        }
-
-        if let Some(std_out) = scontrol_fields.get("StdOut") {
-            job.std_out = Some(std_out.clone());
-        }
-
-        if let Some(std_err) = scontrol_fields.get("StdErr") {
-            job.std_err = Some(std_err.clone());
+        // Fields copied verbatim from scontrol into an Option<String>.
+        let copies: [(&str, &mut Option<String>); 6] = [
+            ("WorkDir", &mut job.working_dir),
+            ("StdOut", &mut job.std_out),
+            ("StdErr", &mut job.std_err),
+            ("MinMemoryNode", &mut job.memory),
+            ("Reason", &mut job.reason),
+            ("TimeLimit", &mut job.time_limit),
+        ];
+        for (key, slot) in copies {
+            if let Some(value) = scontrol_fields.get(key) {
+                *slot = Some(value.clone());
+            }
         }
 
         if let Some(nodes) = scontrol_fields.get("NumNodes") {
@@ -127,23 +130,11 @@ impl SlurmParser {
             job.cpus = cpus.parse().ok();
         }
 
-        if let Some(memory) = scontrol_fields.get("MinMemoryNode") {
-            job.memory = Some(memory.clone());
-        }
-
-        if let Some(reason) = scontrol_fields.get("Reason") {
-            job.reason = Some(reason.clone());
-        }
-
         if let Some(exit_code) = scontrol_fields.get("ExitCode") {
             // Exit code format is usually "0:0" where first is exit code, second is signal
             if let Some(code) = exit_code.split(':').next() {
                 job.exit_code = code.parse().ok();
             }
-        }
-
-        if let Some(time_limit) = scontrol_fields.get("TimeLimit") {
-            job.time_limit = Some(time_limit.clone());
         }
     }
 
@@ -154,17 +145,10 @@ impl SlurmParser {
             return None;
         }
 
-        // Try parsing with seconds
-        if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S") {
-            return Some(dt.and_utc());
-        }
-
-        // Try parsing with microseconds
-        if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S%.f") {
-            return Some(dt.and_utc());
-        }
-
-        None
+        ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f"]
+            .iter()
+            .find_map(|fmt| NaiveDateTime::parse_from_str(time_str, fmt).ok())
+            .map(|dt| dt.and_utc())
     }
 
     pub fn get_job_log_paths(job: &Job) -> Vec<String> {

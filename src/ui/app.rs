@@ -167,8 +167,8 @@ impl App {
             state: AppState::Normal,
             selected_job_index: 0,
             selected_job: None,
-            current_user: std::env::var("USER").ok(),
-            my_user: std::env::var("USER").ok(),
+            current_user: crate::utils::user::invoking_user(),
+            my_user: crate::utils::user::invoking_user(),
             current_partition: None,
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
@@ -305,20 +305,18 @@ impl App {
     }
 
     pub fn next_tab(&mut self) {
-        let i = ActiveTab::ALL
-            .iter()
-            .position(|t| *t == self.active_tab)
-            .unwrap_or(0);
-        self.switch_tab(ActiveTab::ALL[(i + 1) % ActiveTab::ALL.len()]);
+        self.step_tab(1);
     }
 
     pub fn prev_tab(&mut self) {
-        let i = ActiveTab::ALL
-            .iter()
-            .position(|t| *t == self.active_tab)
-            .unwrap_or(0);
-        let n = ActiveTab::ALL.len();
-        self.switch_tab(ActiveTab::ALL[(i + n - 1) % n]);
+        self.step_tab(-1);
+    }
+
+    fn step_tab(&mut self, delta: isize) {
+        let all = ActiveTab::ALL;
+        let i = all.iter().position(|t| *t == self.active_tab).unwrap_or(0);
+        let next = (i as isize + delta).rem_euclid(all.len() as isize) as usize;
+        self.switch_tab(all[next]);
     }
 
     /// Re-fetch the active cluster view (no-op on the Jobs tab).

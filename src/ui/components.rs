@@ -56,14 +56,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         return;
     }
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // Status bar (title + tabs)
-            Constraint::Min(0),    // Main content
-            Constraint::Length(3), // Help/actions bar
-        ])
-        .split(frame.area());
+    let chunks = dashboard_rows(frame.area());
 
     render_status_bar(frame, app, chunks[0]);
 
@@ -182,15 +175,23 @@ impl TabRects {
     }
 }
 
-pub fn tab_rects(area: Rect) -> TabRects {
-    let status = Layout::default()
+/// The dashboard's vertical split: status bar, main content, help bar.
+/// Rendering, tab hit-testing, and mouse routing all derive their geometry
+/// from here so the clickable regions can never drift from what's drawn.
+pub fn dashboard_rows(area: Rect) -> [Rect; 3] {
+    let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(1), // status bar (title + tabs)
+            Constraint::Min(0),    // main content
+            Constraint::Length(3), // help / actions bar
         ])
-        .split(area)[0];
+        .split(area);
+    [rows[0], rows[1], rows[2]]
+}
+
+pub fn tab_rects(area: Rect) -> TabRects {
+    let status = dashboard_rows(area)[0];
 
     let widths: Vec<(ActiveTab, u16)> = ActiveTab::ALL
         .iter()
@@ -354,7 +355,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Some(user) => left.push(Span::styled(user.clone(), Style::default().fg(theme::FG))),
         None => left.push(Span::styled(
             "all",
-            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
         )),
     }
 
@@ -438,6 +441,16 @@ fn col(text: &str, width: usize) -> String {
     )
 }
 
+/// A left-aligned, padded, truncated table cell as a styled span.
+fn cell(text: &str, width: usize, style: Style) -> Span<'static> {
+    Span::styled(col(text, width), style)
+}
+
+/// Format an optional numeric field, falling back to "-" when absent.
+fn opt<T>(value: Option<T>, fmt: impl Fn(T) -> String) -> String {
+    value.map(fmt).unwrap_or_else(|| "-".to_string())
+}
+
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
     let visible = app.visible_jobs();
     let total = app.job_list.jobs.len();
@@ -478,17 +491,21 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
     let all_users = app.current_user.is_none();
     let cols = job_columns(list_row.width as usize, all_users);
 
+    // The optional columns and their widths, shared by the header and every
+    // row so the two can never disagree on which columns are visible.
+    let optional_cols: [(&str, usize); 3] = [
+        ("PART", cols.partition),
+        ("USER", cols.user),
+        ("TIME", cols.time),
+    ];
+
     let mut header_str = String::from("    ");
     header_str.push_str(&col("JOBID", cols.id));
     header_str.push_str(&col("NAME", cols.name));
-    if cols.partition > 0 {
-        header_str.push_str(&col("PART", cols.partition));
-    }
-    if cols.user > 0 {
-        header_str.push_str(&col("USER", cols.user));
-    }
-    if cols.time > 0 {
-        header_str.push_str(&col("TIME", cols.time));
+    for (label, width) in optional_cols {
+        if width > 0 {
+            header_str.push_str(&col(label, width));
+        }
     }
     header_str.push_str("STATE");
     let header = Line::from(Span::styled(header_str, Style::default().fg(theme::MUTED)));
@@ -519,23 +536,18 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
             let mut spans = vec![
                 rail,
                 pin,
-                Span::styled(col(&job.display_id(), cols.id), base.fg(theme::FG)),
-                Span::styled(col(&job.name, cols.name), base.fg(theme::FG)),
+                cell(&job.display_id(), cols.id, base.fg(theme::FG)),
+                cell(&job.name, cols.name, base.fg(theme::FG)),
             ];
-            if cols.partition > 0 {
-                spans.push(Span::styled(
-                    col(&job.partition, cols.partition),
-                    base.fg(theme::MUTED),
-                ));
-            }
-            if cols.user > 0 {
-                spans.push(Span::styled(col(&job.user, cols.user), base.fg(theme::MUTED)));
-            }
-            if cols.time > 0 {
-                spans.push(Span::styled(
-                    col(job.time_used.as_deref().unwrap_or("--"), cols.time),
-                    base.fg(theme::MUTED),
-                ));
+            let values = [
+                job.partition.as_str(),
+                job.user.as_str(),
+                job.time_used.as_deref().unwrap_or("--"),
+            ];
+            for ((_, width), value) in optional_cols.iter().zip(values) {
+                if *width > 0 {
+                    spans.push(cell(value, *width, base.fg(theme::MUTED)));
+                }
             }
             spans.push(theme::state_badge(&job.state));
 
@@ -561,13 +573,34 @@ struct JobTableCol {
 /// Columns for the fullscreen htop-style jobs table, left to right. The length
 /// must stay in sync with `app::JOBS_TABLE_COLUMNS`.
 const JOB_TABLE_COLS: [JobTableCol; 7] = [
-    JobTableCol { title: "JOBID", width: 14 },
-    JobTableCol { title: "NAME", width: 24 },
-    JobTableCol { title: "USER", width: 12 },
-    JobTableCol { title: "PARTITION", width: 12 },
-    JobTableCol { title: "STATE", width: 12 },
-    JobTableCol { title: "TIME", width: 10 },
-    JobTableCol { title: "NODES", width: 20 },
+    JobTableCol {
+        title: "JOBID",
+        width: 14,
+    },
+    JobTableCol {
+        title: "NAME",
+        width: 24,
+    },
+    JobTableCol {
+        title: "USER",
+        width: 12,
+    },
+    JobTableCol {
+        title: "PARTITION",
+        width: 12,
+    },
+    JobTableCol {
+        title: "STATE",
+        width: 12,
+    },
+    JobTableCol {
+        title: "TIME",
+        width: 10,
+    },
+    JobTableCol {
+        title: "NODES",
+        width: 20,
+    },
 ];
 
 /// The cell text for each column of one job, in `JOB_TABLE_COLS` order.
@@ -773,12 +806,12 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        Some(LogRead::Empty(_)) => {
-            render_placeholder(frame, theme::panel("Logs", focused), area, "This job's log is empty")
-        }
-        Some(LogRead::Missing(_)) => {
-            render_placeholder(frame, theme::panel("Logs", focused), area, "No log output yet")
-        }
+        Some(other) => render_placeholder(
+            frame,
+            theme::panel("Logs", focused),
+            area,
+            other.placeholder_message(),
+        ),
         None => render_placeholder(
             frame,
             theme::panel("Logs", focused),
@@ -826,12 +859,8 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("r", "refresh"),
         ("c", "cancel"),
     ];
-    let usage_hints: &[(&str, &str)] = &[
-        ("q", "quit"),
-        ("⇥", "tab"),
-        ("a", "all"),
-        ("r", "refresh"),
-    ];
+    let usage_hints: &[(&str, &str)] =
+        &[("q", "quit"), ("⇥", "tab"), ("a", "all"), ("r", "refresh")];
     let cluster_hints: &[(&str, &str)] = &[
         ("q", "quit"),
         ("⇥", "tab"),
@@ -935,6 +964,20 @@ fn kv(key: &str, value: String) -> Line<'static> {
     ])
 }
 
+/// Push a `kv` row only when the optional value is present.
+fn push_opt(lines: &mut Vec<Line<'static>>, key: &str, value: &Option<String>) {
+    if let Some(v) = value {
+        lines.push(kv(key, v.clone()));
+    }
+}
+
+/// Push a `kv` row only when the value is non-empty.
+fn push_nonempty(lines: &mut Vec<Line<'static>>, key: &str, value: &str) {
+    if !value.is_empty() {
+        lines.push(kv(key, value.to_string()));
+    }
+}
+
 /// A labelled progress bar row (`label ▓▓▓░░  suffix`) for the Details pane.
 fn progress_line(
     label: &str,
@@ -1027,7 +1070,10 @@ fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
 
     if app.activity_job_id.as_deref() == Some(job.job_id.as_str()) && app.activity.len() >= 2 {
         let sizes: Vec<u64> = app.activity.iter().copied().collect();
-        let deltas: Vec<u64> = sizes.windows(2).map(|w| w[1].saturating_sub(w[0])).collect();
+        let deltas: Vec<u64> = sizes
+            .windows(2)
+            .map(|w| w[1].saturating_sub(w[0]))
+            .collect();
         let flowing = deltas.iter().rev().take(3).any(|&d| d > 0);
         let (note, color) = if flowing {
             (" writing", theme::RUNNING)
@@ -1048,10 +1094,7 @@ fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
 }
 
 fn job_detail_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(theme::state_badge(&job.state)),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from(theme::state_badge(&job.state)), Line::from("")];
     lines.extend(job_progress_lines(app, job));
     lines.push(kv("User", job.user.clone()));
     lines.push(kv("Partition", job.partition.clone()));
@@ -1059,9 +1102,7 @@ fn job_detail_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
     if let Some(nodes) = job.nodes {
         lines.push(kv("Nodes", nodes.to_string()));
     }
-    if let Some(node_list) = &job.node_list {
-        lines.push(kv("Node list", node_list.clone()));
-    }
+    push_opt(&mut lines, "Node list", &job.node_list);
     if let Some(submit_time) = &job.submit_time {
         lines.push(kv(
             "Submitted",
@@ -1086,15 +1127,9 @@ fn job_detail_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
             format!("{}h {}m {}s", total / 3600, (total % 3600) / 60, total % 60),
         ));
     }
-    if let Some(working_dir) = &job.working_dir {
-        lines.push(kv("Work dir", working_dir.clone()));
-    }
-    if let Some(std_out) = &job.std_out {
-        lines.push(kv("Log file", std_out.clone()));
-    }
-    if let Some(reason) = &job.reason {
-        lines.push(kv("Reason", reason.clone()));
-    }
+    push_opt(&mut lines, "Work dir", &job.working_dir);
+    push_opt(&mut lines, "Log file", &job.std_out);
+    push_opt(&mut lines, "Reason", &job.reason);
 
     lines
 }
@@ -1232,15 +1267,12 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
                 area,
             );
         }
-        LogRead::Empty(_) => render_placeholder(
+        other => render_placeholder(
             frame,
             theme::panel("Logs", true),
             area,
-            "This job's log is empty",
+            other.placeholder_message(),
         ),
-        LogRead::Missing(_) => {
-            render_placeholder(frame, theme::panel("Logs", true), area, "No log output yet")
-        }
     }
 }
 
@@ -1286,25 +1318,30 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
                 rows[1],
             );
         }
-        LogRead::Empty(_) => {
+        other => {
             frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
             render_placeholder(
                 frame,
                 theme::panel("Logs", true),
                 rows[1],
-                "This job's log is empty",
-            );
-        }
-        LogRead::Missing(_) => {
-            frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
-            render_placeholder(
-                frame,
-                theme::panel("Logs", true),
-                rows[1],
-                "No log output yet",
+                other.placeholder_message(),
             );
         }
     }
+}
+
+/// A centered, muted-italic line inside `area`, for empty and loading states.
+fn centered_message(frame: &mut Frame, area: Rect, msg: &str) {
+    let body = vec![
+        Line::from(""),
+        Line::styled(
+            msg.to_string(),
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
+    ];
+    frame.render_widget(Paragraph::new(body).alignment(Alignment::Center), area);
 }
 
 /// A titled panel with a column header and a selectable, scrolling list.
@@ -1323,16 +1360,7 @@ fn render_cluster_list(
     frame.render_widget(block, area);
 
     if let Some(msg) = message {
-        let body = vec![
-            Line::from(""),
-            Line::styled(
-                msg.to_string(),
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ];
-        frame.render_widget(Paragraph::new(body).alignment(Alignment::Center), inner);
+        centered_message(frame, inner, msg);
         return;
     }
 
@@ -1471,11 +1499,8 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 rail,
-                Span::styled(
-                    format!("{:<18}", truncate(&node.name, 17)),
-                    base.fg(theme::FG),
-                ),
-                Span::styled(format!("{:<10}", truncate(&node.state, 9)), base.fg(color)),
+                cell(&node.name, 18, base.fg(theme::FG)),
+                cell(&node.state, 10, base.fg(color)),
             ];
             spans.extend(mini_bar(
                 node.cpus_alloc as usize,
@@ -1497,8 +1522,9 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 base.fg(theme::MUTED),
             ));
-            spans.push(Span::styled(
-                format!("{:<20}", truncate(node.gres.as_deref().unwrap_or("-"), 19)),
+            spans.push(cell(
+                node.gres.as_deref().unwrap_or("-"),
+                20,
                 base.fg(theme::FG),
             ));
             spans.push(Span::styled(
@@ -1549,9 +1575,10 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 rail,
-                Span::styled(format!("{:<18}", truncate(&name, 17)), base.fg(theme::FG)),
-                Span::styled(
-                    format!("{:<8}", part.availability),
+                cell(&name, 18, base.fg(theme::FG)),
+                cell(
+                    &part.availability,
+                    8,
                     base.fg(if up { theme::RUNNING } else { theme::FAILED }),
                 ),
             ];
@@ -1568,7 +1595,7 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 base.fg(theme::MUTED),
             ));
-            spans.push(Span::styled(format!("{:<10}", ""), base.fg(theme::MUTED)));
+            spans.push(cell("", 10, base.fg(theme::MUTED)));
             spans.push(Span::styled(part.time_limit.clone(), base.fg(theme::FG)));
 
             ListItem::new(Line::from(spans)).style(base)
@@ -1650,16 +1677,7 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
         app.fairshare.is_empty(),
         "sshare returned no rows",
     ) {
-        let body = vec![
-            Line::from(""),
-            Line::styled(
-                msg.to_string(),
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ];
-        frame.render_widget(Paragraph::new(body).alignment(Alignment::Center), inner);
+        centered_message(frame, inner, msg);
         return;
     }
 
@@ -1669,7 +1687,6 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
         )
     };
-    let dash = "-".to_string();
 
     let mut lines: Vec<Line> = vec![
         heading("Your fairshare standing"),
@@ -1685,21 +1702,21 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     for e in &app.fairshare {
         lines.push(Line::from(vec![
-            Span::styled(format!("  {:<12}", truncate(&e.user, 11)), Style::default().fg(theme::FG)),
             Span::styled(
-                format!("{:<12}", truncate(&e.account, 11)),
+                format!("  {:<12}", truncate(&e.user, 11)),
+                Style::default().fg(theme::FG),
+            ),
+            cell(&e.account, 12, Style::default().fg(theme::MUTED)),
+            Span::styled(
+                format!("{:>12}", opt(e.raw_usage, |u| u.to_string())),
                 Style::default().fg(theme::MUTED),
             ),
             Span::styled(
-                format!("{:>12}", e.raw_usage.map(|u| u.to_string()).unwrap_or_else(|| dash.clone())),
+                format!("{:>14}", opt(e.effectv_usage, |u| format!("{u:.6}"))),
                 Style::default().fg(theme::MUTED),
             ),
             Span::styled(
-                format!("{:>14}", e.effectv_usage.map(|u| format!("{u:.6}")).unwrap_or_else(|| dash.clone())),
-                Style::default().fg(theme::MUTED),
-            ),
-            Span::styled(
-                format!("{:>12}", e.fair_share.map(|u| format!("{u:.4}")).unwrap_or_else(|| dash.clone())),
+                format!("{:>12}", opt(e.fair_share, |u| format!("{u:.4}"))),
                 Style::default()
                     .fg(fairshare_color(e.band()))
                     .add_modifier(Modifier::BOLD),
@@ -1716,10 +1733,7 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
     lines.push(fairshare_reading(reading_row));
 
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: true }),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
 fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1738,26 +1752,11 @@ fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 rail,
-                Span::styled(
-                    format!("{:<12}", truncate(&entry.job_id, 11)),
-                    base.fg(theme::FG),
-                ),
-                Span::styled(
-                    format!("{:<18}", truncate(&entry.name, 17)),
-                    base.fg(theme::FG),
-                ),
-                Span::styled(
-                    format!("{:<12}", truncate(&entry.state, 11)),
-                    base.fg(color),
-                ),
-                Span::styled(
-                    format!("{:<8}", entry.exit_code.clone()),
-                    base.fg(theme::MUTED),
-                ),
-                Span::styled(
-                    format!("{:<12}", entry.elapsed.clone()),
-                    base.fg(theme::MUTED),
-                ),
+                cell(&entry.job_id, 12, base.fg(theme::FG)),
+                cell(&entry.name, 18, base.fg(theme::FG)),
+                cell(&entry.state, 12, base.fg(color)),
+                cell(&entry.exit_code, 8, base.fg(theme::MUTED)),
+                cell(&entry.elapsed, 12, base.fg(theme::MUTED)),
                 Span::styled(truncate(&entry.end, 19), base.fg(theme::MUTED)),
             ]))
             .style(base)
@@ -1912,26 +1911,18 @@ fn acct_detail_lines(d: &AcctDetail) -> Vec<Line<'static>> {
 
     let mut lines = vec![Line::from(badge), Line::from("")];
     lines.push(kv("User", d.user.clone()));
-    if !d.account.is_empty() {
-        lines.push(kv("Account", d.account.clone()));
-    }
+    push_nonempty(&mut lines, "Account", &d.account);
     lines.push(kv("Partition", d.partition.clone()));
-    if !d.node_list.is_empty() {
-        lines.push(kv("Nodes", d.node_list.clone()));
-    }
+    push_nonempty(&mut lines, "Nodes", &d.node_list);
     lines.push(kv("CPUs", d.alloc_cpus.clone()));
     lines.push(kv("Memory", format!("req {req}   used {used}")));
-    if !d.total_cpu.is_empty() {
-        lines.push(kv("CPU time", d.total_cpu.clone()));
-    }
+    push_nonempty(&mut lines, "CPU time", &d.total_cpu);
     lines.push(kv("Submitted", d.submit.clone()));
     lines.push(kv("Started", d.start.clone()));
     lines.push(kv("Ended", d.end.clone()));
     lines.push(kv("Elapsed", d.elapsed.clone()));
     lines.push(kv("Exit code", d.exit_code.clone()));
-    if !d.work_dir.is_empty() {
-        lines.push(kv("Work dir", d.work_dir.clone()));
-    }
+    push_nonempty(&mut lines, "Work dir", &d.work_dir);
 
     lines
 }

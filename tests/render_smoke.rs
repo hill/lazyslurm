@@ -89,7 +89,10 @@ fn usage_tab_renders_fairshare_row_and_reading() {
     app.fairshare = vec![sample_fairshare()];
     app.my_user = Some("hilltj".into());
     let text = rendered_text(&app);
-    assert!(text.contains("hilltj"), "fairshare row should show the user");
+    assert!(
+        text.contains("hilltj"),
+        "fairshare row should show the user"
+    );
     assert!(text.contains("0.1208"), "fairshare factor should render");
     assert!(
         text.contains("below the 0.5 midpoint"),
@@ -100,14 +103,22 @@ fn usage_tab_renders_fairshare_row_and_reading() {
 #[test]
 fn details_pane_shows_walltime_progress() {
     let mut app = App::new();
-    let mut job = Job::new("48201".into(), "train".into(), "alice".into(), JobState::Running);
+    let mut job = Job::new(
+        "48201".into(),
+        "train".into(),
+        "alice".into(),
+        JobState::Running,
+    );
     job.time_used = Some("12:00:00".into());
     job.time_limit = Some("24:00:00".into());
     app.job_list.jobs = vec![job.clone()];
     app.selected_job = Some(job);
 
     let text = rendered_text(&app);
-    assert!(text.contains("Walltime"), "walltime progress row should render");
+    assert!(
+        text.contains("Walltime"),
+        "walltime progress row should render"
+    );
     assert!(text.contains("50%"), "should show the elapsed percentage");
 }
 
