@@ -70,6 +70,12 @@ struct Cli {
         help = "Fetch jobs once, print as JSON to stdout, and exit (headless mode)"
     )]
     json: bool,
+
+    #[arg(
+        long = "no-update-check",
+        help = "Skip the startup check for a newer release (also LAZYSLURM_NO_UPDATE_CHECK)"
+    )]
+    no_update_check: bool,
 }
 
 #[tokio::main]
@@ -99,6 +105,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create app and run
     let mut app = App::with_cli(cli.user, cli.partition, cli.all);
+
+    let update_check_disabled =
+        cli.no_update_check || std::env::var_os("LAZYSLURM_NO_UPDATE_CHECK").is_some();
+    if !update_check_disabled {
+        app.start_update_check();
+    }
+
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal

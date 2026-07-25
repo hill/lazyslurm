@@ -326,6 +326,22 @@ fn jobs_filter_line_and_count_render() {
 }
 
 #[test]
+fn update_badge_shows_only_when_a_version_is_set() {
+    let mut app = App::new();
+    assert!(
+        !rendered_text(&app).contains("↑ v"),
+        "no badge without an available update"
+    );
+
+    app.update_available = Some("9.9.9".into());
+    let text = rendered_text(&app);
+    assert!(
+        text.contains("↑ v9.9.9"),
+        "update pill shown in status bar, got: {text}"
+    );
+}
+
+#[test]
 fn pinned_job_shows_star_marker() {
     use lazyslurm::models::{Job, JobState};
     let mut app = App::new();

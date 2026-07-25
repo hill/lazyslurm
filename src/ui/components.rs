@@ -309,6 +309,28 @@ fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), inner);
 }
 
+/// The leftmost status-bar badge. Its width anchors the update pill's position.
+const BRAND_BADGE: &str = " ❄ lazyslurm ";
+
+fn update_badge_label(latest: &str) -> String {
+    format!(" ↑ v{latest} ")
+}
+
+/// Screen rect of the clickable update pill, or `None` when it isn't shown.
+/// Derived from the same layout the renderer uses so clicks land on the badge.
+/// `status_area` is the status-bar row (`dashboard_rows(area)[0]`).
+pub fn update_badge_rect(app: &App, status_area: Rect) -> Option<Rect> {
+    // The error banner replaces the normal left content, hiding the badge.
+    if app.error_message.is_some() {
+        return None;
+    }
+    let latest = app.update_available.as_ref()?;
+    // One raw space separates the brand badge from the pill.
+    let x = status_area.x + BRAND_BADGE.chars().count() as u16 + 1;
+    let width = update_badge_label(latest).chars().count() as u16;
+    Some(Rect::new(x, status_area.y, width, 1))
+}
+
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     // The tabs sit right-aligned on this same line, inline with the title.
     let (tabs, tab_width) = tab_strip(app);
@@ -340,12 +362,24 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let mut left = vec![Span::styled(
-        " ❄ lazyslurm ",
+        BRAND_BADGE,
         Style::default()
             .bg(theme::ACCENT)
             .fg(theme::BADGE_FG)
             .add_modifier(Modifier::BOLD),
     )];
+
+    // A clickable pill when a newer release exists (opens the crates.io page).
+    if let Some(latest) = &app.update_available {
+        left.push(Span::raw(" "));
+        left.push(Span::styled(
+            update_badge_label(latest),
+            Style::default()
+                .bg(theme::ACCENT_PINK)
+                .fg(theme::BADGE_FG)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     let sep = || Span::raw("   ");
 

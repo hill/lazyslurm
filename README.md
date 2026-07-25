@@ -36,18 +36,24 @@ Built in Rust with [ratatui](https://ratatui.rs/) and released as a single binar
 Download the latest binary for your platform from [GitHub Releases](https://github.com/hill/lazyslurm/releases):
 
 ```bash
-# Linux x64
-curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-linux-x64.tar.gz | tar xz
+# Linux x64 (glibc)
+curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv lazyslurm /usr/local/bin/
+
+# Linux x64 (static musl build, best for older cluster login nodes)
+curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-x86_64-unknown-linux-musl.tar.gz | tar xz
 sudo mv lazyslurm /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-macos-arm64.tar.gz | tar xz
+curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-aarch64-apple-darwin.tar.gz | tar xz
 sudo mv lazyslurm /usr/local/bin/
 
 # macOS (Intel)
-curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-macos-x64.tar.gz | tar xz
+curl -L https://github.com/hill/lazyslurm/releases/latest/download/lazyslurm-x86_64-apple-darwin.tar.gz | tar xz
 sudo mv lazyslurm /usr/local/bin/
 ```
+
+Windows builds (`lazyslurm-x86_64-pc-windows-msvc.zip`) are on the [releases page](https://github.com/hill/lazyslurm/releases/latest).
 
 ### Homebrew
 

@@ -1,11 +1,11 @@
 use crate::app::{ActiveTab, App, AppState, FocusPanel};
-use crate::{dashboard_rows, panel_rects, render_app, tab_rects};
+use crate::{dashboard_rows, panel_rects, render_app, tab_rects, update_badge_rect};
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     MouseEvent, MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     error::Error,
@@ -319,6 +319,15 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
         && let Some(tab) = tab_rects(area).hit(mouse.column, mouse.row)
     {
         app.switch_tab(tab);
+        return;
+    }
+
+    // Clicking the update badge opens the crates.io page.
+    if let MouseEventKind::Down(_) = mouse.kind
+        && let Some(badge) = update_badge_rect(app, dashboard_rows(area)[0])
+        && badge.contains(Position::new(mouse.column, mouse.row))
+    {
+        crate::update::open_url(crate::update::CRATES_URL);
         return;
     }
 

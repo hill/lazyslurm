@@ -1,6 +1,7 @@
 pub mod models;
 pub mod slurm;
 pub mod ui;
+pub mod update;
 pub mod utils;
 
 pub use models::*;

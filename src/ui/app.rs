@@ -21,6 +21,8 @@ pub enum AppEvent {
     // Boxed: AcctDetail is much larger than the other variants' payloads.
     HistoryDetailFetched(Result<Box<AcctDetail>, String>),
     FairShareFetched(Result<Vec<FairShareEntry>, String>),
+    /// A newer stable version if one exists on crates.io, else `None`.
+    UpdateCheckFetched(Option<String>),
 }
 
 /// The top-level views, switched with Tab or the number keys. Jobs is the
@@ -141,6 +143,8 @@ pub struct App {
     pub fairshare: Vec<FairShareEntry>,
     pub fairshare_loading: bool,
     pub fairshare_error: Option<String>,
+    /// A newer version available on crates.io, shown as a status-bar badge.
+    pub update_available: Option<String>,
     /// Live, case-insensitive filter over the Jobs list (name or id).
     pub filter_query: String,
     /// Pinned job ids. Pinned jobs float to the top and ignore the filter.
@@ -211,6 +215,7 @@ impl App {
             fairshare: Vec::new(),
             fairshare_loading: false,
             fairshare_error: None,
+            update_available: None,
             filter_query: String::new(),
             pinned: std::collections::HashSet::new(),
             raw_log_paths: Vec::new(),
@@ -400,6 +405,16 @@ impl App {
         });
     }
 
+    /// One-shot, fail-silent check for a newer release. Never blocks startup;
+    /// the result arrives through `drain_events` like any other fetch.
+    pub fn start_update_check(&mut self) {
+        let sender = self.event_sender.clone();
+        tokio::spawn(async move {
+            let latest = crate::update::check_for_update().await;
+            let _ = sender.send(AppEvent::UpdateCheckFetched(latest));
+        });
+    }
+
     /// Open the History detail for the selected row and fetch it.
     pub fn open_history_detail(&mut self) {
         let Some(entry) = self.history.get(self.selected_history_index) else {
@@ -564,6 +579,9 @@ impl App {
                         Err(e) => self.fairshare_error = Some(e),
                     }
                     self.fairshare_loading = false;
+                }
+                AppEvent::UpdateCheckFetched(latest) => {
+                    self.update_available = latest;
                 }
             }
         }
