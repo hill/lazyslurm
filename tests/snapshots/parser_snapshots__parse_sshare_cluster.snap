@@ -1,0 +1,32 @@
+---
+source: tests/parser_snapshots.rs
+expression: entries
+---
+- account: hpc
+  user: alice
+  raw_shares: 1
+  norm_shares: 0.25
+  raw_usage: 745574
+  effectv_usage: 0.4
+  fair_share: 0.1208
+- account: hpc
+  user: bob
+  raw_shares: 1
+  norm_shares: 0.25
+  raw_usage: 120000
+  effectv_usage: 0.1
+  fair_share: 0.802
+- account: hpc
+  user: carol
+  raw_shares: 1
+  norm_shares: 0.25
+  raw_usage: 300000
+  effectv_usage: 0.25
+  fair_share: 0.5
+- account: hpc
+  user: dave
+  raw_shares: 1
+  norm_shares: 0.25
+  raw_usage: 50000
+  effectv_usage: 0.03
+  fair_share: 0.93

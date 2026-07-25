@@ -59,6 +59,13 @@ struct Cli {
     partition: Option<String>,
 
     #[arg(
+        short = 'a',
+        long = "all",
+        help = "Show jobs for all users (overrides --user)"
+    )]
+    all: bool,
+
+    #[arg(
         long = "json",
         help = "Fetch jobs once, print as JSON to stdout, and exit (headless mode)"
     )]
@@ -80,7 +87,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if cli.json {
-        return run_headless(cli.user, cli.partition).await;
+        return run_headless(cli.user, cli.partition, cli.all).await;
     }
 
     // Setup terminal
@@ -91,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::with_cli(cli.user, cli.partition);
+    let mut app = App::with_cli(cli.user, cli.partition, cli.all);
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal
@@ -113,8 +120,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn run_headless(
     user: Option<String>,
     partition: Option<String>,
+    all: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let mut app = App::with_cli(user, partition);
+    let mut app = App::with_cli(user, partition, all);
     app.refresh_jobs().await?;
 
     if let Some(err) = &app.error_message {

@@ -44,6 +44,16 @@ pub fn read_tail_for_job(job: &Job, max_bytes: u64) -> LogRead {
     read_tail_for_paths(SlurmParser::get_job_log_paths(job), max_bytes)
 }
 
+/// Byte length of a job's first readable log file, for the activity heartbeat.
+pub fn log_size_for_job(job: &Job) -> Option<u64> {
+    for path in SlurmParser::get_job_log_paths(job) {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            return Some(meta.len());
+        }
+    }
+    None
+}
+
 /// Tail the first of `paths` that reads.
 pub fn read_tail_for_paths(paths: Vec<String>, max_bytes: u64) -> LogRead {
     for path in &paths {

@@ -126,6 +126,14 @@ async fn parse_sacct_cluster() {
 }
 
 #[tokio::test]
+async fn parse_sshare_cluster() {
+    let exec = SlurmFixture::new(fixture_dir("cluster"));
+    let raw = exec.sshare(None).await.unwrap();
+    let entries = SlurmParser::parse_sshare(&raw);
+    insta::assert_yaml_snapshot!(entries);
+}
+
+#[tokio::test]
 async fn parse_sacct_detail_cluster() {
     let exec = SlurmFixture::new(fixture_dir("cluster"));
     let raw = exec.sacct_job("48100").await.unwrap();

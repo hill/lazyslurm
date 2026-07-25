@@ -78,6 +78,43 @@ async fn background_refresh_delivers_jobs_through_events() {
 }
 
 #[tokio::test]
+async fn toggle_all_users_flips_between_me_and_everyone() {
+    let (mut app, _) = fixture_app("cluster");
+    app.current_user = Some("hilltj".into());
+    app.my_user = Some("hilltj".into());
+
+    app.toggle_all_users();
+    assert_eq!(app.current_user, None, "first toggle shows all users");
+
+    app.toggle_all_users();
+    assert_eq!(
+        app.current_user.as_deref(),
+        Some("hilltj"),
+        "second toggle restores my user"
+    );
+}
+
+#[tokio::test]
+async fn fairshare_fetch_populates_usage_rows() {
+    let (mut app, _) = fixture_app("cluster");
+    app.start_fairshare_refresh();
+    assert!(app.fairshare_loading);
+
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+        app.drain_events();
+        if !app.fairshare.is_empty() {
+            break;
+        }
+    }
+
+    assert!(!app.fairshare_loading);
+    assert!(app.fairshare.iter().any(|e| e.user == "alice"));
+    // The account-aggregate row (empty user) must not appear.
+    assert!(app.fairshare.iter().all(|e| !e.user.is_empty()));
+}
+
+#[tokio::test]
 async fn stale_fetch_results_are_dropped_after_filter_change() {
     let (mut app, _) = fixture_app("basic");
     app.refresh_jobs().await.unwrap();

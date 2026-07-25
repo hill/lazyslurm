@@ -121,6 +121,24 @@ impl Job {
         )
     }
 
+    pub fn elapsed_secs(&self) -> Option<u64> {
+        self.time_used.as_deref().and_then(parse_duration_secs)
+    }
+
+    pub fn limit_secs(&self) -> Option<u64> {
+        self.time_limit.as_deref().and_then(parse_duration_secs)
+    }
+
+    /// Fraction of the wall-clock time limit consumed, clamped to `0.0..=1.0`.
+    /// `None` when either value is missing or the limit is unbounded.
+    pub fn walltime_fraction(&self) -> Option<f32> {
+        let (elapsed, limit) = (self.elapsed_secs()?, self.limit_secs()?);
+        if limit == 0 {
+            return None;
+        }
+        Some((elapsed as f32 / limit as f32).clamp(0.0, 1.0))
+    }
+
     pub fn duration(&self) -> Option<chrono::Duration> {
         match (&self.start_time, &self.end_time) {
             (Some(start), Some(end)) => Some(*end - *start),
@@ -133,6 +151,68 @@ impl Job {
             _ => None,
         }
     }
+}
+
+/// Parse a SLURM duration (`D-HH:MM:SS`, `HH:MM:SS`, `MM:SS`, or `SS`) to
+/// seconds. Sentinels like `UNLIMITED` or `N/A` return `None`.
+pub fn parse_duration_secs(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if !s.as_bytes()[0].is_ascii_digit() {
+        // UNLIMITED, N/A, NOT_SET, INVALID, Partition_Limit, ...
+        return None;
+    }
+
+    let (days, hms) = match s.split_once('-') {
+        Some((d, rest)) => (d.parse::<u64>().ok()?, rest),
+        None => (0, s),
+    };
+
+    let parts: Vec<&str> = hms.split(':').collect();
+    let (h, m, sec): (u64, u64, u64) = match parts.as_slice() {
+        [h, m, s] => (h.parse().ok()?, m.parse().ok()?, s.parse().ok()?),
+        [m, s] => (0, m.parse().ok()?, s.parse().ok()?),
+        [s] => (0, 0, s.parse().ok()?),
+        _ => return None,
+    };
+
+    Some(days * 86_400 + h * 3_600 + m * 60 + sec)
+}
+
+/// Number of array tasks a squeue job id stands for. A concrete task (`123_4`)
+/// is one; a bracketed spec (`123_[2-4]`, `123_[1,3-5%2]`) counts its members.
+pub fn array_task_count(job_id: &str) -> u64 {
+    let Some((_, spec)) = job_id.split_once('_') else {
+        return 1;
+    };
+    let spec = spec.trim();
+    if !spec.starts_with('[') {
+        return 1;
+    }
+
+    // Strip the brackets and any "%N" concurrency cap, then count the members.
+    let inner = spec.trim_start_matches('[').trim_end_matches(']');
+    let inner = inner.split('%').next().unwrap_or(inner);
+
+    let mut count = 0u64;
+    for part in inner.split(',') {
+        match part.split_once('-') {
+            Some((a, b)) => {
+                if let (Ok(a), Ok(b)) = (a.trim().parse::<u64>(), b.trim().parse::<u64>()) {
+                    count += b.saturating_sub(a) + 1;
+                }
+            }
+            None => {
+                if part.trim().parse::<u64>().is_ok() {
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    count.max(1)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,5 +273,40 @@ mod tests {
         job.start_time = Some(Utc::now() - chrono::Duration::seconds(30));
         let d = job.duration().expect("should have a duration");
         assert!(d.num_seconds() >= 30 && d.num_seconds() < 120);
+    }
+
+    #[test]
+    fn parses_slurm_durations() {
+        assert_eq!(parse_duration_secs("13:08"), Some(13 * 60 + 8));
+        assert_eq!(parse_duration_secs("1:42:09"), Some(3600 + 42 * 60 + 9));
+        assert_eq!(parse_duration_secs("1-00:00:00"), Some(86_400));
+        assert_eq!(parse_duration_secs("45"), Some(45));
+        assert_eq!(parse_duration_secs("UNLIMITED"), None);
+        assert_eq!(parse_duration_secs("N/A"), None);
+        assert_eq!(parse_duration_secs(""), None);
+    }
+
+    #[test]
+    fn walltime_fraction_is_elapsed_over_limit() {
+        let mut job = Job::new("1".into(), "j".into(), "u".into(), JobState::Running);
+        job.time_used = Some("12:00:00".into());
+        job.time_limit = Some("24:00:00".into());
+        assert_eq!(job.walltime_fraction(), Some(0.5));
+
+        // Over-run clamps to 1.0 rather than exceeding the bar.
+        job.time_used = Some("2-00:00:00".into());
+        assert_eq!(job.walltime_fraction(), Some(1.0));
+
+        job.time_limit = Some("UNLIMITED".into());
+        assert_eq!(job.walltime_fraction(), None);
+    }
+
+    #[test]
+    fn counts_array_tasks() {
+        assert_eq!(array_task_count("48210_5"), 1);
+        assert_eq!(array_task_count("48210_[2-4]"), 3);
+        assert_eq!(array_task_count("48210_[2-4%2]"), 3);
+        assert_eq!(array_task_count("48210_[1,3-5]"), 4);
+        assert_eq!(array_task_count("48210"), 1);
     }
 }

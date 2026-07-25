@@ -3,7 +3,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
 use std::collections::HashMap;
 
-use crate::models::{AcctDetail, AcctEntry, Job, JobState, Node, Partition};
+use crate::models::{AcctDetail, AcctEntry, FairShareEntry, Job, JobState, Node, Partition};
 
 pub struct SlurmParser;
 
@@ -65,6 +65,9 @@ impl SlurmParser {
                 }
                 if parts.len() > 6 {
                     job.partition = parts[6].trim().to_string();
+                }
+                if parts.len() > 7 {
+                    job.time_limit = non_null(parts[7]);
                 }
 
                 jobs.push(job);
@@ -320,6 +323,41 @@ impl SlurmParser {
         entries
     }
 
+    /// Parse `sshare -P -n -o Account,User,RawShares,NormShares,RawUsage,EffectvUsage,FairShare`.
+    /// Account-aggregate rows (empty User) are dropped so only user rows remain.
+    pub fn parse_sshare(output: &str) -> Vec<FairShareEntry> {
+        let mut entries = Vec::new();
+
+        for line in output.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let f: Vec<&str> = line.split('|').collect();
+            if f.len() < 7 {
+                continue;
+            }
+
+            let user = f[1].trim();
+            if user.is_empty() {
+                continue;
+            }
+
+            entries.push(FairShareEntry {
+                account: f[0].trim().to_string(),
+                user: user.to_string(),
+                raw_shares: f[2].trim().parse().ok(),
+                norm_shares: f[3].trim().parse().ok(),
+                raw_usage: f[4].trim().parse().ok(),
+                effectv_usage: f[5].trim().parse().ok(),
+                fair_share: f[6].trim().parse().ok(),
+            });
+        }
+
+        entries
+    }
+
     /// Parse `sacct -j` detail. The largest MaxRSS across the step rows is
     /// folded in. `None` if the allocation row is missing.
     pub fn parse_sacct_detail(output: &str, job_id: &str) -> Option<AcctDetail> {
@@ -448,6 +486,22 @@ mod cluster_tests {
         assert!(entries[0].succeeded());
         assert!(!entries[1].succeeded());
         assert_eq!(entries[1].exit_code, "1:0");
+    }
+
+    #[test]
+    fn parses_sshare_and_skips_account_rows() {
+        use crate::models::FairShareBand;
+        // A root/account aggregate (empty user) then two user rows.
+        let raw = "root||1|1.000000|1250000|1.000000|0.500000\n\
+                   hpc|alice|1|0.250000|745574|0.400000|0.120800\n\
+                   hpc|bob|1|0.250000|120000|0.100000|0.802000\n";
+        let entries = SlurmParser::parse_sshare(raw);
+        assert_eq!(entries.len(), 2, "the empty-user aggregate row is dropped");
+        assert_eq!(entries[0].user, "alice");
+        assert_eq!(entries[0].raw_usage, Some(745_574));
+        assert_eq!(entries[0].fair_share, Some(0.120800));
+        assert_eq!(entries[0].band(), Some(FairShareBand::Penalised));
+        assert_eq!(entries[1].band(), Some(FairShareBand::Boosted));
     }
 
     #[test]

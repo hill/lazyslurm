@@ -2,7 +2,7 @@
 //! layout or unicode-width panic shows up here rather than only in a live
 //! terminal. They also pin that the right content reaches the screen.
 
-use lazyslurm::models::{AcctDetail, AcctEntry, Node, Partition};
+use lazyslurm::models::{AcctDetail, AcctEntry, FairShareEntry, Job, JobState, Node, Partition};
 use lazyslurm::ui::{ActiveTab, App, AppState, render_app, tab_rects};
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
@@ -61,13 +61,61 @@ fn sample_entry() -> AcctEntry {
     }
 }
 
+fn sample_fairshare() -> FairShareEntry {
+    FairShareEntry {
+        account: "punim3036".into(),
+        user: "hilltj".into(),
+        raw_shares: Some(1),
+        norm_shares: Some(0.001),
+        raw_usage: Some(745_574),
+        effectv_usage: Some(0.001663),
+        fair_share: Some(0.1208),
+    }
+}
+
 #[test]
 fn tab_bar_shows_every_tab() {
     let app = App::new();
     let text = rendered_text(&app);
-    for label in ["Jobs", "Nodes", "Partitions", "History"] {
+    for label in ["Jobs", "Nodes", "Partitions", "History", "Usage"] {
         assert!(text.contains(label), "tab bar missing {label}");
     }
+}
+
+#[test]
+fn usage_tab_renders_fairshare_row_and_reading() {
+    let mut app = App::new();
+    app.active_tab = ActiveTab::Usage;
+    app.fairshare = vec![sample_fairshare()];
+    app.my_user = Some("hilltj".into());
+    let text = rendered_text(&app);
+    assert!(text.contains("hilltj"), "fairshare row should show the user");
+    assert!(text.contains("0.1208"), "fairshare factor should render");
+    assert!(
+        text.contains("below the 0.5 midpoint"),
+        "a below-midpoint factor should read as penalised"
+    );
+}
+
+#[test]
+fn details_pane_shows_walltime_progress() {
+    let mut app = App::new();
+    let mut job = Job::new("48201".into(), "train".into(), "alice".into(), JobState::Running);
+    job.time_used = Some("12:00:00".into());
+    job.time_limit = Some("24:00:00".into());
+    app.job_list.jobs = vec![job.clone()];
+    app.selected_job = Some(job);
+
+    let text = rendered_text(&app);
+    assert!(text.contains("Walltime"), "walltime progress row should render");
+    assert!(text.contains("50%"), "should show the elapsed percentage");
+}
+
+#[test]
+fn all_users_toggle_shows_all_in_status_bar() {
+    let mut app = App::new();
+    app.current_user = None;
+    assert!(rendered_text(&app).contains("user all"));
 }
 
 #[test]

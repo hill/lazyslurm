@@ -20,7 +20,7 @@ impl SlurmExecutor for SlurmProcess {
             cmd.arg("-p").arg(partition);
         }
 
-        cmd.arg("--format=%i,%j,%u,%t,%M,%N,%P");
+        cmd.arg("--format=%i,%j,%u,%t,%M,%N,%P,%l");
 
         let output = cmd.output().await.context("Failed to execute squeue")?;
 
@@ -136,6 +136,34 @@ impl SlurmExecutor for SlurmProcess {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("sacct failed: {}", stderr);
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    async fn sshare(&self, user: Option<&str>) -> Result<String> {
+        let mut cmd = TokioCommand::new("sshare");
+        cmd.args([
+            "-P",
+            "-n",
+            "-o",
+            "Account,User,RawShares,NormShares,RawUsage,EffectvUsage,FairShare",
+        ]);
+
+        match user {
+            Some(user) => {
+                cmd.arg("-U").arg("-u").arg(user);
+            }
+            None => {
+                cmd.arg("-a");
+            }
+        }
+
+        let output = cmd.output().await.context("Failed to execute sshare")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("sshare failed: {}", stderr);
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())

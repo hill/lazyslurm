@@ -23,6 +23,7 @@ pub const MUTED: Color = Color::Rgb(0x85, 0x83, 0x92); // secondary labels
 pub const DIM_BORDER: Color = Color::Rgb(0x4D, 0x4C, 0x57); // unfocused borders
 pub const BADGE_FG: Color = Color::Rgb(0x20, 0x1F, 0x26); // dark text on a filled badge
 pub const SELECT_BG: Color = Color::Rgb(0x2D, 0x2C, 0x36); // selected row background
+pub const COL_HL: Color = Color::Rgb(0x33, 0x2E, 0x52); // focused-column background (accent-tinted)
 
 /// MiniDot braille spinner, a Charm staple. Stepped at half tick-rate so it
 /// reads as a smooth ~5fps rather than a blur.

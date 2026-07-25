@@ -18,4 +18,7 @@ pub trait SlurmExecutor: Send + Sync {
 
     /// Full detail for one job, including step rows so MaxRSS is available.
     async fn sacct_job(&self, job_id: &str) -> Result<String>;
+
+    /// Fairshare standing (`sshare`). `user` limits to that user; `None` shows all.
+    async fn sshare(&self, user: Option<&str>) -> Result<String>;
 }

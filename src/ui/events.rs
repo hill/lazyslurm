@@ -124,6 +124,7 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('2'), _) => app.switch_tab(ActiveTab::Nodes),
         (KeyCode::Char('3'), _) => app.switch_tab(ActiveTab::Partitions),
         (KeyCode::Char('4'), _) => app.switch_tab(ActiveTab::History),
+        (KeyCode::Char('5'), _) => app.switch_tab(ActiveTab::Usage),
         (KeyCode::Left, _) | (KeyCode::Char('h'), _) if app.active_tab == ActiveTab::Jobs => {
             app.focus_left();
         }
@@ -163,6 +164,7 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('p'), _) => {
             app.state = AppState::PartitionSearchPopup;
         }
+        (KeyCode::Char('a'), _) => app.toggle_all_users(),
         (KeyCode::Char('c'), _) if app.active_tab == ActiveTab::Jobs => {
             app.open_cancel_popup();
         }
@@ -198,6 +200,9 @@ fn event_fullscreen(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn 
         // On the Jobs pane the arrows move the selection; elsewhere they scroll.
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) if on_jobs => app.select_previous_job(),
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) if on_jobs => app.select_next_job(),
+        // Left/Right walk the table columns, htop-style, scrolling to reveal them.
+        (KeyCode::Left, _) | (KeyCode::Char('h'), _) if on_jobs => app.jobs_col_left(),
+        (KeyCode::Right, _) | (KeyCode::Char('l'), _) if on_jobs => app.jobs_col_right(),
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.fullscreen_scroll_up(1),
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.fullscreen_scroll_down(1),
         (KeyCode::PageUp, _) => app.fullscreen_scroll_up(PAGE),
@@ -293,6 +298,7 @@ pub async fn run_event_loop(
         if app.should_refresh() {
             app.start_refresh();
             app.refresh_active_tab();
+            app.sample_activity();
         }
 
         if last_tick.elapsed() >= tick_rate {

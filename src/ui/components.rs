@@ -4,7 +4,7 @@ use crate::ui::theme;
 use crate::ui::{ActiveTab, App, FocusPanel};
 use crate::{
     AppState,
-    models::{AcctDetail, AcctEntry, Job, Node},
+    models::{AcctDetail, AcctEntry, FairShareBand, FairShareEntry, Job, Node},
 };
 use ratatui::{
     Frame,
@@ -72,6 +72,7 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         ActiveTab::Nodes => render_nodes_tab(frame, app, chunks[1]),
         ActiveTab::Partitions => render_partitions_tab(frame, app, chunks[1]),
         ActiveTab::History => render_history_tab(frame, app, chunks[1]),
+        ActiveTab::Usage => render_usage_tab(frame, app, chunks[1]),
     }
 
     render_help_bar(app, frame, chunks[2]);
@@ -219,6 +220,7 @@ fn tab_is_loading(app: &App) -> bool {
         ActiveTab::Nodes => app.nodes_loading,
         ActiveTab::Partitions => app.partitions_loading,
         ActiveTab::History => app.history_loading,
+        ActiveTab::Usage => app.fairshare_loading,
     }
 }
 
@@ -346,10 +348,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let sep = || Span::raw("   ");
 
-    if let Some(user) = &app.current_user {
-        left.push(sep());
-        left.push(Span::styled("user ", Style::default().fg(theme::MUTED)));
-        left.push(Span::styled(user.clone(), Style::default().fg(theme::FG)));
+    left.push(sep());
+    left.push(Span::styled("user ", Style::default().fg(theme::MUTED)));
+    match &app.current_user {
+        Some(user) => left.push(Span::styled(user.clone(), Style::default().fg(theme::FG))),
+        None => left.push(Span::styled(
+            "all",
+            Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD),
+        )),
     }
 
     if let Some(part) = &app.current_partition {
@@ -376,6 +382,60 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(Line::from(left)), cols[0]);
+}
+
+/// Widths for the jobs list columns; `0` means the column is hidden. NAME
+/// flexes into whatever is left after the higher-priority columns are placed.
+struct JobCols {
+    id: usize,
+    name: usize,
+    partition: usize,
+    user: usize,
+    time: usize,
+}
+
+/// Budget the jobs list columns against the available width. JOBID and the
+/// STATE badge are always kept; PARTITION, USER, then TIME drop in that order
+/// as the pane narrows, and NAME never shrinks below a readable minimum.
+fn job_columns(width: usize, all_users: bool) -> JobCols {
+    const MIN_NAME: usize = 10;
+    // 4 for the rail+pin prefix, ~12 for the trailing STATE badge.
+    let base = width.saturating_sub(4 + 12);
+    let id = 10.min(base);
+    let mut remaining = base.saturating_sub(id);
+
+    let mut partition = 0;
+    let mut user = 0;
+    let mut time = 0;
+    if remaining >= MIN_NAME + 12 {
+        partition = 12;
+        remaining -= 12;
+    }
+    if all_users && remaining >= MIN_NAME + 10 {
+        user = 10;
+        remaining -= 10;
+    }
+    if remaining >= MIN_NAME + 8 {
+        time = 8;
+        remaining -= 8;
+    }
+
+    JobCols {
+        id,
+        name: remaining,
+        partition,
+        user,
+        time,
+    }
+}
+
+/// A left-aligned cell truncated to leave a one-column gap before the next.
+fn col(text: &str, width: usize) -> String {
+    format!(
+        "{:<width$}",
+        truncate(text, width.saturating_sub(1)),
+        width = width
+    )
 }
 
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -414,11 +474,24 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
         (rows[0], rows[1])
     };
 
-    let header = Line::from(Span::styled(
-        // Four leading spaces: two for the selection rail, two for the pin mark.
-        format!("    {:<7}{:<15}{:<8}STATE", "JOBID", "NAME", "TIME"),
-        Style::default().fg(theme::MUTED),
-    ));
+    // Four leading spaces cover the rail (2) and the pin mark (2).
+    let all_users = app.current_user.is_none();
+    let cols = job_columns(list_row.width as usize, all_users);
+
+    let mut header_str = String::from("    ");
+    header_str.push_str(&col("JOBID", cols.id));
+    header_str.push_str(&col("NAME", cols.name));
+    if cols.partition > 0 {
+        header_str.push_str(&col("PART", cols.partition));
+    }
+    if cols.user > 0 {
+        header_str.push_str(&col("USER", cols.user));
+    }
+    if cols.time > 0 {
+        header_str.push_str(&col("TIME", cols.time));
+    }
+    header_str.push_str("STATE");
+    let header = Line::from(Span::styled(header_str, Style::default().fg(theme::MUTED)));
     frame.render_widget(Paragraph::new(header), header_row);
 
     let jobs: Vec<ListItem> = visible
@@ -443,19 +516,30 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled("  ", base)
             };
 
-            let job_id = truncate(&job.display_id(), 6);
-            let job_name = truncate(&job.name, 14);
-            let time_used = job.time_used.as_deref().unwrap_or("--");
-
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 rail,
                 pin,
-                Span::styled(format!("{:<7}", job_id), base.fg(theme::FG)),
-                Span::styled(format!("{:<15}", job_name), base.fg(theme::FG)),
-                Span::styled(format!("{:<8}", time_used), base.fg(theme::MUTED)),
-                theme::state_badge(&job.state),
-            ]))
-            .style(base)
+                Span::styled(col(&job.display_id(), cols.id), base.fg(theme::FG)),
+                Span::styled(col(&job.name, cols.name), base.fg(theme::FG)),
+            ];
+            if cols.partition > 0 {
+                spans.push(Span::styled(
+                    col(&job.partition, cols.partition),
+                    base.fg(theme::MUTED),
+                ));
+            }
+            if cols.user > 0 {
+                spans.push(Span::styled(col(&job.user, cols.user), base.fg(theme::MUTED)));
+            }
+            if cols.time > 0 {
+                spans.push(Span::styled(
+                    col(job.time_used.as_deref().unwrap_or("--"), cols.time),
+                    base.fg(theme::MUTED),
+                ));
+            }
+            spans.push(theme::state_badge(&job.state));
+
+            ListItem::new(Line::from(spans)).style(base)
         })
         .collect();
 
@@ -466,6 +550,153 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.selected_job_index.min(visible.len() - 1)));
     }
     frame.render_stateful_widget(List::new(jobs), list_row, &mut state);
+}
+
+/// A fullscreen jobs-table column: title and fixed character width.
+struct JobTableCol {
+    title: &'static str,
+    width: usize,
+}
+
+/// Columns for the fullscreen htop-style jobs table, left to right. The length
+/// must stay in sync with `app::JOBS_TABLE_COLUMNS`.
+const JOB_TABLE_COLS: [JobTableCol; 7] = [
+    JobTableCol { title: "JOBID", width: 14 },
+    JobTableCol { title: "NAME", width: 24 },
+    JobTableCol { title: "USER", width: 12 },
+    JobTableCol { title: "PARTITION", width: 12 },
+    JobTableCol { title: "STATE", width: 12 },
+    JobTableCol { title: "TIME", width: 10 },
+    JobTableCol { title: "NODES", width: 20 },
+];
+
+/// The cell text for each column of one job, in `JOB_TABLE_COLS` order.
+fn job_table_cells(job: &Job) -> [String; 7] {
+    [
+        job.display_id(),
+        job.name.clone(),
+        job.user.clone(),
+        job.partition.clone(),
+        theme::state_label(&job.state),
+        job.time_used.clone().unwrap_or_else(|| "--".to_string()),
+        job.node_list.clone().unwrap_or_else(|| "-".to_string()),
+    ]
+}
+
+/// Render fixed-width cells into a `Line`, showing only the `[scroll, scroll+win)`
+/// character window so the table can scroll horizontally without losing styles.
+fn slice_cells(cells: &[(String, Style)], scroll: usize, win: usize) -> Line<'static> {
+    let end = scroll + win;
+    let mut x = 0usize;
+    let mut spans: Vec<Span> = Vec::new();
+    for (text, style) in cells {
+        let chars: Vec<char> = text.chars().collect();
+        let cell_start = x;
+        let cell_end = x + chars.len();
+        x = cell_end;
+
+        let vis_start = cell_start.max(scroll);
+        let vis_end = cell_end.min(end);
+        if vis_start >= vis_end {
+            continue;
+        }
+        let slice: String = chars[(vis_start - cell_start)..(vis_end - cell_start)]
+            .iter()
+            .collect();
+        spans.push(Span::styled(slice, *style));
+    }
+    Line::from(spans)
+}
+
+/// The fullscreen, htop-style jobs table: every column, a focused column moved
+/// with Left/Right, and horizontal scrolling when it is wider than the screen.
+fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
+    let visible = app.visible_jobs();
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+    let win = rows[1].width as usize;
+
+    // Character x of each column start, after a 2-wide selection rail.
+    const PREFIX: usize = 2;
+    let mut starts = [0usize; JOB_TABLE_COLS.len()];
+    let mut x = PREFIX;
+    for (i, c) in JOB_TABLE_COLS.iter().enumerate() {
+        starts[i] = x;
+        x += c.width;
+    }
+    let total_width = x;
+
+    // Scroll just far enough that the focused column's right edge is on screen.
+    let focus = app.jobs_col.min(JOB_TABLE_COLS.len() - 1);
+    let focus_end = starts[focus] + JOB_TABLE_COLS[focus].width;
+    let scroll = if focus_end <= win {
+        0
+    } else {
+        (focus_end - win).min(total_width.saturating_sub(win))
+    };
+
+    let mut header_cells: Vec<(String, Style)> = vec![("  ".to_string(), Style::default())];
+    for (i, c) in JOB_TABLE_COLS.iter().enumerate() {
+        let style = if i == focus {
+            Style::default()
+                .fg(theme::ACCENT)
+                .bg(theme::COL_HL)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::MUTED)
+        };
+        header_cells.push((col(c.title, c.width), style));
+    }
+    frame.render_widget(
+        Paragraph::new(slice_cells(&header_cells, scroll, win)),
+        rows[0],
+    );
+
+    let items: Vec<ListItem> = visible
+        .iter()
+        .enumerate()
+        .map(|(i, job)| {
+            let selected = i == app.selected_job_index;
+            let base = if selected {
+                Style::default().bg(theme::SELECT_BG)
+            } else {
+                Style::default()
+            };
+
+            let rail = if selected {
+                ("▌ ".to_string(), base.fg(theme::ACCENT))
+            } else {
+                ("  ".to_string(), base)
+            };
+            let mut cells: Vec<(String, Style)> = vec![rail];
+
+            let values = job_table_cells(job);
+            for (ci, c) in JOB_TABLE_COLS.iter().enumerate() {
+                let mut style = match c.title {
+                    "STATE" => base.fg(theme::state_color(&job.state)),
+                    "JOBID" | "NAME" => base.fg(theme::FG),
+                    _ => base.fg(theme::MUTED),
+                };
+                if ci == focus {
+                    // A background band marks the focused column across every row,
+                    // overriding the row-selection background where they cross.
+                    style = style.bg(theme::COL_HL).add_modifier(Modifier::BOLD);
+                }
+                cells.push((col(&values[ci], c.width), style));
+            }
+
+            ListItem::new(slice_cells(&cells, scroll, win)).style(base)
+        })
+        .collect();
+
+    let mut state = ratatui::widgets::ListState::default();
+    if !visible.is_empty() {
+        state.select(Some(app.selected_job_index.min(visible.len() - 1)));
+    }
+    frame.render_stateful_widget(List::new(items), rows[1], &mut state);
 }
 
 /// The live filter line above the job list.
@@ -504,7 +735,7 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
     let block = theme::panel("Details", app.focus == FocusPanel::Details);
 
     let body = if let Some(job) = app.get_selected_job() {
-        job_detail_lines(job)
+        job_detail_lines(app, job)
     } else if app.job_list.jobs.is_empty() {
         empty_state_lines(app.quote)
     } else {
@@ -523,18 +754,18 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
-    let block = theme::panel("Logs", app.focus == FocusPanel::Logs);
+    let focused = app.focus == FocusPanel::Logs;
 
     match app
         .get_selected_job()
         .map(|job| read_tail_for_job(job, TAIL_BYTES))
     {
         Some(LogRead::Lines { path, text }) => {
-            let content = format!("{path}\n{}\n{text}", "─".repeat(40));
-            let line_count = content.lines().count();
+            let block = logs_panel(&path, focused, area.width);
+            let line_count = text.lines().count();
             let offset = clamp_scroll(app.logs_scroll, line_count, block.inner(area).height);
             frame.render_widget(
-                Paragraph::new(content)
+                Paragraph::new(text)
                     .style(Style::default().fg(theme::FG))
                     .block(block)
                     .wrap(Wrap { trim: true })
@@ -543,10 +774,17 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
             );
         }
         Some(LogRead::Empty(_)) => {
-            render_placeholder(frame, block, area, "This job's log is empty")
+            render_placeholder(frame, theme::panel("Logs", focused), area, "This job's log is empty")
         }
-        Some(LogRead::Missing(_)) => render_placeholder(frame, block, area, "No log output yet"),
-        None => render_placeholder(frame, block, area, "Select a job to view logs"),
+        Some(LogRead::Missing(_)) => {
+            render_placeholder(frame, theme::panel("Logs", focused), area, "No log output yet")
+        }
+        None => render_placeholder(
+            frame,
+            theme::panel("Logs", focused),
+            area,
+            "Select a job to view logs",
+        ),
     }
 }
 
@@ -583,8 +821,16 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("⏎", "view"),
         ("/", "filter"),
         ("P", "pin"),
+        ("u", "users"),
+        ("a", "all"),
         ("r", "refresh"),
         ("c", "cancel"),
+    ];
+    let usage_hints: &[(&str, &str)] = &[
+        ("q", "quit"),
+        ("⇥", "tab"),
+        ("a", "all"),
+        ("r", "refresh"),
     ];
     let cluster_hints: &[(&str, &str)] = &[
         ("q", "quit"),
@@ -605,6 +851,7 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
     let pairs: &[(&str, &str)] = match app.state {
         AppState::Normal if app.active_tab == ActiveTab::Jobs => jobs_hints,
         AppState::Normal if app.active_tab == ActiveTab::History => history_hints,
+        AppState::Normal if app.active_tab == ActiveTab::Usage => usage_hints,
         AppState::Normal => cluster_hints,
         AppState::CancelJobPopup => &[("y", "confirm"), ("n", "reject"), ("esc", "reject")],
         AppState::PartitionSearchPopup | AppState::UserSearchPopup => {
@@ -688,13 +935,126 @@ fn kv(key: &str, value: String) -> Line<'static> {
     ])
 }
 
-fn job_detail_lines(job: &Job) -> Vec<Line<'static>> {
+/// A labelled progress bar row (`label ▓▓▓░░  suffix`) for the Details pane.
+fn progress_line(
+    label: &str,
+    filled: usize,
+    total: usize,
+    color: ratatui::style::Color,
+    suffix: String,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!("{label:<11}"),
+        Style::default().fg(theme::MUTED),
+    )];
+    spans.extend(mini_bar(filled, total, 12, color));
+    spans.push(Span::styled(
+        format!("  {suffix}"),
+        Style::default().fg(theme::FG),
+    ));
+    Line::from(spans)
+}
+
+const SPARK: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// A block-character sparkline of the per-tick deltas.
+fn sparkline(deltas: &[u64]) -> String {
+    let max = deltas.iter().copied().max().unwrap_or(0);
+    if max == 0 {
+        return SPARK[0].to_string().repeat(deltas.len().max(1));
+    }
+    deltas
+        .iter()
+        .map(|&d| {
+            let idx = ((d as f64 / max as f64) * (SPARK.len() - 1) as f64).round() as usize;
+            SPARK[idx.min(SPARK.len() - 1)]
+        })
+        .collect()
+}
+
+/// Progress rows derived from live signals: wall-clock budget, array task
+/// aggregate, and a log-activity heartbeat. Only shown for running jobs.
+fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    if !job.is_running() {
+        return out;
+    }
+
+    if let (Some(frac), Some(used), Some(limit)) =
+        (job.walltime_fraction(), &job.time_used, &job.time_limit)
+    {
+        let color = if frac < 0.75 {
+            theme::RUNNING
+        } else if frac < 0.9 {
+            theme::PENDING
+        } else {
+            theme::FAILED
+        };
+        let pct = (frac * 100.0).round() as u32;
+        out.push(progress_line(
+            "Walltime",
+            job.elapsed_secs().unwrap_or(0) as usize,
+            job.limit_secs().unwrap_or(1) as usize,
+            color,
+            format!("{pct}%  {used} / {limit}"),
+        ));
+    }
+
+    if let Some(array_id) = &job.array_job_id {
+        let (mut running, mut pending) = (0u64, 0u64);
+        for j in &app.job_list.jobs {
+            if j.array_job_id.as_deref() != Some(array_id.as_str()) {
+                continue;
+            }
+            let n = crate::models::array_task_count(&j.job_id);
+            match j.state {
+                crate::models::JobState::Running => running += n,
+                crate::models::JobState::Pending => pending += n,
+                _ => {}
+            }
+        }
+        let total = running + pending;
+        if total > 0 {
+            out.push(progress_line(
+                "Array",
+                running as usize,
+                total as usize,
+                theme::RUNNING,
+                format!("{running} run · {pending} pend"),
+            ));
+        }
+    }
+
+    if app.activity_job_id.as_deref() == Some(job.job_id.as_str()) && app.activity.len() >= 2 {
+        let sizes: Vec<u64> = app.activity.iter().copied().collect();
+        let deltas: Vec<u64> = sizes.windows(2).map(|w| w[1].saturating_sub(w[0])).collect();
+        let flowing = deltas.iter().rev().take(3).any(|&d| d > 0);
+        let (note, color) = if flowing {
+            (" writing", theme::RUNNING)
+        } else {
+            (" quiet", theme::MUTED)
+        };
+        out.push(Line::from(vec![
+            Span::styled("Activity   ", Style::default().fg(theme::MUTED)),
+            Span::styled(sparkline(&deltas), Style::default().fg(color)),
+            Span::styled(note, Style::default().fg(theme::MUTED)),
+        ]));
+    }
+
+    if !out.is_empty() {
+        out.push(Line::from(""));
+    }
+    out
+}
+
+fn job_detail_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(theme::state_badge(&job.state)),
         Line::from(""),
-        kv("User", job.user.clone()),
-        kv("Partition", job.partition.clone()),
     ];
+    lines.extend(job_progress_lines(app, job));
+    lines.push(kv("User", job.user.clone()));
+    lines.push(kv("Partition", job.partition.clone()));
 
     if let Some(nodes) = job.nodes {
         lines.push(kv("Nodes", nodes.to_string()));
@@ -751,7 +1111,12 @@ fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     let hints: &[(&str, &str)] = match app.fullscreen_panel {
-        FocusPanel::Jobs => &[("esc", "back"), ("↑↓", "select"), ("q", "quit")],
+        FocusPanel::Jobs => &[
+            ("esc", "back"),
+            ("↑↓", "select"),
+            ("←→", "columns"),
+            ("q", "quit"),
+        ],
         FocusPanel::Details => &[("esc", "back"), ("↑↓", "scroll"), ("q", "quit")],
         FocusPanel::Logs => &[
             ("esc", "back"),
@@ -765,7 +1130,7 @@ fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(fullscreen_header(app)), rows[0]);
 
     match app.fullscreen_panel {
-        FocusPanel::Jobs => render_jobs_list(frame, app, rows[1]),
+        FocusPanel::Jobs => render_jobs_table(frame, app, rows[1]),
         FocusPanel::Details => render_fullscreen_details(frame, app, rows[1]),
         FocusPanel::Logs => render_fullscreen_logs(frame, app, rows[1]),
     }
@@ -827,7 +1192,7 @@ fn fullscreen_header(app: &App) -> Line<'static> {
 fn render_fullscreen_details(frame: &mut Frame, app: &App, area: Rect) {
     let block = theme::panel("Details", true);
     let body = match &app.fullscreen_job {
-        Some(job) => job_detail_lines(job),
+        Some(job) => job_detail_lines(app, job),
         None => vec![Line::styled(
             "No job selected",
             Style::default().fg(theme::MUTED),
@@ -850,7 +1215,7 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
 
     match read_tail_for_job(job, TAIL_BYTES) {
         LogRead::Lines { path, text } => {
-            let block = theme::panel(&format!("Logs · {path}"), true);
+            let block = logs_panel(&path, true, area.width);
             let viewport = block.inner(area).height;
             let total = text.lines().count();
             let offset = if app.log_follow {
@@ -1204,6 +1569,135 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+fn fairshare_color(band: Option<FairShareBand>) -> ratatui::style::Color {
+    match band {
+        Some(FairShareBand::Penalised) => theme::PENDING,
+        Some(FairShareBand::Boosted) => theme::RUNNING,
+        _ => theme::MUTED,
+    }
+}
+
+/// A plain-language reading of the invoking user's fairshare factor, with the
+/// value and the verdict word emphasised.
+fn fairshare_reading(row: Option<&FairShareEntry>) -> Line<'static> {
+    let muted = Style::default()
+        .fg(theme::MUTED)
+        .add_modifier(Modifier::ITALIC);
+    let strong = Style::default()
+        .fg(theme::FG)
+        .add_modifier(Modifier::BOLD | Modifier::ITALIC);
+
+    let Some((row, f)) = row.and_then(|r| r.fair_share.map(|f| (r, f))) else {
+        return Line::styled("No fairshare factor reported for your account.", muted);
+    };
+
+    let (verdict, tail) = match row.band() {
+        Some(FairShareBand::Penalised) => (
+            "below",
+            " the 0.5 midpoint. Recent usage has run ahead of your target share, so new jobs get a mild priority penalty. It decays over time and recovers as you idle.",
+        ),
+        Some(FairShareBand::Boosted) => (
+            "above",
+            " the 0.5 midpoint. You are under your target share, so new jobs get a small priority boost.",
+        ),
+        _ => (
+            "around",
+            " the neutral 0.5 midpoint. Your usage is close to your target share.",
+        ),
+    };
+
+    Line::from(vec![
+        Span::styled("FairShare ", muted),
+        Span::styled(format!("{f:.4}"), strong.fg(fairshare_color(row.band()))),
+        Span::styled(" sits ", muted),
+        Span::styled(verdict, strong),
+        Span::styled(tail, muted),
+    ])
+}
+
+fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let block = theme::panel("Usage", true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(msg) = cluster_message(
+        app.fairshare_loading,
+        &app.fairshare_error,
+        app.fairshare.is_empty(),
+        "sshare returned no rows",
+    ) {
+        let body = vec![
+            Line::from(""),
+            Line::styled(
+                msg.to_string(),
+                Style::default()
+                    .fg(theme::MUTED)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+        ];
+        frame.render_widget(Paragraph::new(body).alignment(Alignment::Center), inner);
+        return;
+    }
+
+    let heading = |text: &str| {
+        Line::styled(
+            text.to_string(),
+            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+        )
+    };
+    let dash = "-".to_string();
+
+    let mut lines: Vec<Line> = vec![
+        heading("Your fairshare standing"),
+        Line::from(""),
+        Line::styled(
+            format!(
+                "  {:<12}{:<12}{:>12}{:>14}{:>12}",
+                "USER", "ACCOUNT", "RAWUSAGE", "EFFECTVUSAGE", "FAIRSHARE"
+            ),
+            Style::default().fg(theme::MUTED),
+        ),
+    ];
+
+    for e in &app.fairshare {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<12}", truncate(&e.user, 11)), Style::default().fg(theme::FG)),
+            Span::styled(
+                format!("{:<12}", truncate(&e.account, 11)),
+                Style::default().fg(theme::MUTED),
+            ),
+            Span::styled(
+                format!("{:>12}", e.raw_usage.map(|u| u.to_string()).unwrap_or_else(|| dash.clone())),
+                Style::default().fg(theme::MUTED),
+            ),
+            Span::styled(
+                format!("{:>14}", e.effectv_usage.map(|u| format!("{u:.6}")).unwrap_or_else(|| dash.clone())),
+                Style::default().fg(theme::MUTED),
+            ),
+            Span::styled(
+                format!("{:>12}", e.fair_share.map(|u| format!("{u:.4}")).unwrap_or_else(|| dash.clone())),
+                Style::default()
+                    .fg(fairshare_color(e.band()))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
+    // Read the invoking user's row (their own, even while showing all users).
+    let me = app.my_user.as_deref().or(app.current_user.as_deref());
+    let reading_row = me
+        .and_then(|u| app.fairshare.iter().find(|e| e.user == u))
+        .or_else(|| app.fairshare.first());
+
+    lines.push(Line::from(""));
+    lines.push(fairshare_reading(reading_row));
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: true }),
+        inner,
+    );
+}
+
 fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
     let header = format!(
         "  {:<12}{:<18}{:<12}{:<8}{:<12}ENDED",
@@ -1450,6 +1944,29 @@ fn truncate(s: &str, max_len: usize) -> String {
         let keep: String = s.chars().take(max_len.saturating_sub(3)).collect();
         format!("{keep}...")
     }
+}
+
+/// Truncate keeping the tail, so a shortened path still shows its filename.
+fn truncate_left(s: &str, max_len: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_len {
+        return s.to_string();
+    }
+    let keep = max_len.saturating_sub(1);
+    let tail: String = s.chars().skip(count - keep).collect();
+    format!("…{tail}")
+}
+
+/// A Logs panel with the file path carried in the border, muted and tail-first
+/// so the filename survives when the path is long.
+fn logs_panel(path: &str, focused: bool, width: u16) -> Block<'static> {
+    // Leave room for the " Logs · " label, the borders, and a trailing gap.
+    let budget = (width as usize).saturating_sub(12).max(8);
+    let shown = truncate_left(path, budget);
+    theme::panel("Logs", focused).title(Span::styled(
+        format!("· {shown} "),
+        Style::default().fg(theme::MUTED),
+    ))
 }
 
 /// Center a rect of fixed cell dimensions, clamped to the available area.

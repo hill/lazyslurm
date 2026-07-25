@@ -3,8 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::models::{AcctDetail, AcctEntry, Job, JobList, Node, Partition};
+use crate::models::{AcctDetail, AcctEntry, FairShareEntry, Job, JobList, Node, Partition};
 use crate::slurm::{SlurmExecutor, SlurmParser, SlurmProcess};
+
+/// Number of columns in the fullscreen jobs table; the ceiling for `jobs_col`.
+pub const JOBS_TABLE_COLUMNS: usize = 7;
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -17,6 +20,7 @@ pub enum AppEvent {
     HistoryFetched(Result<Vec<AcctEntry>, String>),
     // Boxed: AcctDetail is much larger than the other variants' payloads.
     HistoryDetailFetched(Result<Box<AcctDetail>, String>),
+    FairShareFetched(Result<Vec<FairShareEntry>, String>),
 }
 
 /// The top-level views, switched with Tab or the number keys. Jobs is the
@@ -27,14 +31,16 @@ pub enum ActiveTab {
     Nodes,
     Partitions,
     History,
+    Usage,
 }
 
 impl ActiveTab {
-    pub const ALL: [ActiveTab; 4] = [
+    pub const ALL: [ActiveTab; 5] = [
         ActiveTab::Jobs,
         ActiveTab::Nodes,
         ActiveTab::Partitions,
         ActiveTab::History,
+        ActiveTab::Usage,
     ];
 
     pub fn title(&self) -> &'static str {
@@ -43,6 +49,7 @@ impl ActiveTab {
             ActiveTab::Nodes => "Nodes",
             ActiveTab::Partitions => "Partitions",
             ActiveTab::History => "History",
+            ActiveTab::Usage => "Usage",
         }
     }
 }
@@ -82,6 +89,9 @@ pub struct App {
     pub selected_job_index: usize,
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
+    /// The invoking user (`$USER` or `--user`), remembered so the all-users
+    /// toggle can flip back to it after showing everyone.
+    pub my_user: Option<String>,
     pub current_partition: Option<String>,
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
@@ -105,6 +115,8 @@ pub struct App {
     pub fullscreen_job: Option<Job>,
     pub fullscreen_panel: FocusPanel,
     pub fullscreen_scroll: u16,
+    /// Focused column in the fullscreen jobs table (htop-style horizontal nav).
+    pub jobs_col: usize,
     /// Whether the fullscreen Logs view follows the newest line.
     pub log_follow: bool,
     pub active_tab: ActiveTab,
@@ -126,6 +138,9 @@ pub struct App {
     pub history_detail_loading: bool,
     pub history_detail_error: Option<String>,
     pub history_detail_scroll: u16,
+    pub fairshare: Vec<FairShareEntry>,
+    pub fairshare_loading: bool,
+    pub fairshare_error: Option<String>,
     /// Live, case-insensitive filter over the Jobs list (name or id).
     pub filter_query: String,
     /// Pinned job ids. Pinned jobs float to the top and ignore the filter.
@@ -133,6 +148,10 @@ pub struct App {
     /// Candidate log paths the raw view tails, and the state to return to.
     pub raw_log_paths: Vec<String>,
     pub raw_log_origin: AppState,
+    /// Rolling log byte-size samples for the selected job (activity heartbeat),
+    /// alongside the job id they belong to so a change of selection resets them.
+    pub activity_job_id: Option<String>,
+    pub activity: std::collections::VecDeque<u64>,
 }
 
 impl App {
@@ -149,6 +168,7 @@ impl App {
             selected_job_index: 0,
             selected_job: None,
             current_user: std::env::var("USER").ok(),
+            my_user: std::env::var("USER").ok(),
             current_partition: None,
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
@@ -168,6 +188,7 @@ impl App {
             fullscreen_job: None,
             fullscreen_panel: FocusPanel::Jobs,
             fullscreen_scroll: 0,
+            jobs_col: 0,
             log_follow: true,
             active_tab: ActiveTab::Jobs,
             nodes: Vec::new(),
@@ -187,19 +208,59 @@ impl App {
             history_detail_loading: false,
             history_detail_error: None,
             history_detail_scroll: 0,
+            fairshare: Vec::new(),
+            fairshare_loading: false,
+            fairshare_error: None,
             filter_query: String::new(),
             pinned: std::collections::HashSet::new(),
             raw_log_paths: Vec::new(),
             raw_log_origin: AppState::Normal,
+            activity_job_id: None,
+            activity: std::collections::VecDeque::new(),
         }
     }
 
-    pub fn with_cli(user: Option<String>, partition: Option<String>) -> Self {
+    /// Sample the selected job's log size for the activity heartbeat. Resets the
+    /// series when selection changes or the job is not running, so a sparkline
+    /// only ever reflects one live job.
+    pub fn sample_activity(&mut self) {
+        let running = self
+            .selected_job
+            .as_ref()
+            .filter(|job| job.is_running())
+            .map(|job| (job.job_id.clone(), job.clone()));
+
+        let Some((job_id, job)) = running else {
+            self.activity_job_id = None;
+            self.activity.clear();
+            return;
+        };
+
+        if self.activity_job_id.as_deref() != Some(job_id.as_str()) {
+            self.activity_job_id = Some(job_id);
+            self.activity.clear();
+        }
+
+        if let Some(size) = crate::slurm::logs::log_size_for_job(&job) {
+            const CAP: usize = 24;
+            if self.activity.len() == CAP {
+                self.activity.pop_front();
+            }
+            self.activity.push_back(size);
+        }
+    }
+
+    pub fn with_cli(user: Option<String>, partition: Option<String>, all: bool) -> Self {
         let mut app = Self::new();
-        if user.is_some() {
-            app.current_user = user;
+        if let Some(user) = user {
+            app.current_user = Some(user.clone());
+            app.my_user = Some(user);
         }
         app.current_partition = partition;
+        // --all overrides --user: show every user's jobs.
+        if all {
+            app.current_user = None;
+        }
         app
     }
 
@@ -267,6 +328,7 @@ impl App {
             ActiveTab::Nodes => self.start_nodes_refresh(),
             ActiveTab::Partitions => self.start_partitions_refresh(),
             ActiveTab::History => self.start_history_refresh(),
+            ActiveTab::Usage => self.start_fairshare_refresh(),
         }
     }
 
@@ -319,6 +381,24 @@ impl App {
                 .map(|out| SlurmParser::parse_sacct(&out))
                 .map_err(|e| e.to_string());
             let _ = sender.send(AppEvent::HistoryFetched(result));
+        });
+    }
+
+    pub fn start_fairshare_refresh(&mut self) {
+        if self.fairshare_loading {
+            return;
+        }
+        self.fairshare_loading = true;
+        let executor = self.executor.clone();
+        let user = self.current_user.clone();
+        let sender = self.event_sender.clone();
+        tokio::spawn(async move {
+            let result = executor
+                .sshare(user.as_deref())
+                .await
+                .map(|out| SlurmParser::parse_sshare(&out))
+                .map_err(|e| e.to_string());
+            let _ = sender.send(AppEvent::FairShareFetched(result));
         });
     }
 
@@ -382,7 +462,7 @@ impl App {
                 self.selected_history_index =
                     next_index(self.selected_history_index, self.history.len())
             }
-            ActiveTab::Jobs => {}
+            ActiveTab::Jobs | ActiveTab::Usage => {}
         }
     }
 
@@ -397,7 +477,7 @@ impl App {
             ActiveTab::History => {
                 self.selected_history_index = self.selected_history_index.saturating_sub(1)
             }
-            ActiveTab::Jobs => {}
+            ActiveTab::Jobs | ActiveTab::Usage => {}
         }
     }
 
@@ -477,8 +557,30 @@ impl App {
                     }
                     self.history_detail_loading = false;
                 }
+                AppEvent::FairShareFetched(result) => {
+                    match result {
+                        Ok(fairshare) => {
+                            self.fairshare = fairshare;
+                            self.fairshare_error = None;
+                        }
+                        Err(e) => self.fairshare_error = Some(e),
+                    }
+                    self.fairshare_loading = false;
+                }
             }
         }
+    }
+
+    /// Toggle between the invoking user's jobs and every user's jobs.
+    pub fn toggle_all_users(&mut self) {
+        self.current_user = if self.current_user.is_some() {
+            None
+        } else {
+            self.my_user.clone()
+        };
+        self.invalidate_and_refresh();
+        // History and Usage are user-scoped, so reflect the change there too.
+        self.refresh_active_tab();
     }
 
     /// Drop any in-flight fetch and start fresh (on filter change).
@@ -672,9 +774,20 @@ impl App {
             self.fullscreen_job = self.selected_job.clone();
             self.fullscreen_panel = self.focus;
             self.fullscreen_scroll = 0;
+            self.jobs_col = 0;
             self.log_follow = true;
             self.state = AppState::Fullscreen;
         }
+    }
+
+    /// Move the focused column in the fullscreen jobs table. The renderer clamps
+    /// to the real column count, so the ceiling here is just a safety bound.
+    pub fn jobs_col_left(&mut self) {
+        self.jobs_col = self.jobs_col.saturating_sub(1);
+    }
+
+    pub fn jobs_col_right(&mut self) {
+        self.jobs_col = (self.jobs_col + 1).min(JOBS_TABLE_COLUMNS - 1);
     }
 
     pub fn close_fullscreen(&mut self) {
