@@ -3,6 +3,22 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-25
+
+### Added
+- Usage tab showing your fairshare standing from `sshare`
+- Jobs default to your own user now; press `a` to toggle between your jobs and everyone's
+- Update notifications: a badge appears in the status bar when a newer release is on
+  crates.io, and clicking it opens the crates.io page. Opt out with `--no-update-check`
+  or the `LAZYSLURM_NO_UPDATE_CHECK` environment variable
+
+### Fixed
+- Nodes tab no longer merges the CPU and memory columns for nodes with large core
+  counts or memory. Thanks to @joan-aluja-oraa for the fix (#10)
+- User filter no longer falls back to showing all users when `$USER` is unset (for
+  example under `docker exec`); it now resolves your login name reliably
+- Corrected the binary download URLs in the README
+
 ## [0.3.1] - 2026-06-26
 
 ### Fixed
