@@ -2060,7 +2060,7 @@ fn acct_detail_lines(d: &AcctDetail) -> Vec<Line<'static>> {
 }
 
 fn render_history_detail_logs(frame: &mut Frame, app: &App, detail: &AcctDetail, area: Rect) {
-    let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.job_id);
+    let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.std_out, &detail.job_id);
     let block = theme::panel("Logs", true);
 
     match read_tail_for_paths(paths, TAIL_BYTES) {

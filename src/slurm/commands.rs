@@ -127,7 +127,7 @@ impl SlurmExecutor for SlurmProcess {
                 job_id,
                 "-n",
                 "-P",
-                "--format=JobID,JobName,User,Account,Partition,NodeList,AllocCPUS,ReqMem,MaxRSS,TotalCPU,State,ExitCode,Submit,Start,End,Elapsed,WorkDir",
+                "--format=JobID,JobName,User,Account,Partition,NodeList,AllocCPUS,ReqMem,MaxRSS,TotalCPU,State,ExitCode,Submit,Start,End,Elapsed,WorkDir,StdOut",
             ])
             .output()
             .await

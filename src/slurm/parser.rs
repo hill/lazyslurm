@@ -183,10 +183,14 @@ impl SlurmParser {
         paths
     }
 
-    /// Best-effort default log paths for a finished job. A job that used a
-    /// custom `--output` path won't be found here.
-    pub fn get_acct_log_paths(work_dir: &str, job_id: &str) -> Vec<String> {
+    /// Best-effort default log paths for a finished job. The optional
+    /// `std_out` from sacct is tried first, then the conventional SLURM
+    /// patterns inside `work_dir` and `/tmp`.
+    pub fn get_acct_log_paths(work_dir: &str, std_out: &str, job_id: &str) -> Vec<String> {
         let mut paths = Vec::new();
+        if !std_out.is_empty() {
+            paths.push(std_out.to_string());
+        }
         if !work_dir.is_empty() {
             paths.push(format!("{work_dir}/slurm-{job_id}.out"));
             paths.push(format!("{work_dir}/slurm-{job_id}.err"));
@@ -351,7 +355,7 @@ impl SlurmParser {
 
         for line in output.lines() {
             let f: Vec<&str> = line.split('|').collect();
-            if f.len() < 17 {
+            if f.len() < 18 {
                 continue;
             }
 
@@ -374,6 +378,7 @@ impl SlurmParser {
                     end: f[14].trim().to_string(),
                     elapsed: f[15].trim().to_string(),
                     work_dir: f[16].trim().to_string(),
+                    std_out: f[17].trim().to_string(),
                 });
             }
 
