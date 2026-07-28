@@ -14,6 +14,10 @@ use std::{
 };
 
 pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    // The startup theme warning has had its moment by the time you reach for a
+    // key, and the status bar has better things to show.
+    app.theme_warning = None;
+
     match app.state {
         AppState::Normal => event_normal_state(app, key).await,
         AppState::UserSearchPopup => event_user_search_popup(app, key).await,
@@ -23,7 +27,22 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::HistoryDetail => event_history_detail(app, key),
         AppState::FilterInput => event_filter_input(app, key),
         AppState::RawLog => event_raw_log(app, key),
+        AppState::ThemePicker => event_theme_picker(app, key),
     }
+}
+
+/// Theme picker; moving the selection applies it, so Esc has to put the old
+/// one back.
+fn event_theme_picker(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => app.cancel_theme(),
+        (KeyCode::Enter, _) => app.commit_theme(),
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => app.theme_picker_prev(),
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => app.theme_picker_next(),
+        _ => {}
+    }
+    Ok(None)
 }
 
 /// Raw log view; scroll and exit (mouse capture is released for selection).
@@ -178,6 +197,7 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('P'), _) if app.active_tab == ActiveTab::Jobs => {
             app.toggle_pin();
         }
+        (KeyCode::Char('T'), _) => app.open_theme_picker(),
         // Open the raw log view from the focused inline Logs pane.
         (KeyCode::Char('y'), _)
             if app.active_tab == ActiveTab::Jobs && app.focus == FocusPanel::Logs =>

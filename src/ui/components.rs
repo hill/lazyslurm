@@ -11,36 +11,49 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Clear, List, ListItem, Padding, Paragraph, Wrap},
 };
+
+/// Paint `area` in the theme's own colours.
+///
+/// `Clear` resets cells to the terminal default rather than making them
+/// transparent, so a theme with a background has to fill the hole back in or
+/// every popup shows the terminal through it.
+fn clear_popup(frame: &mut Frame, area: Rect) {
+    frame.render_widget(Clear, area);
+    let t = theme::current();
+    if let Some(bg) = t.bg {
+        frame.render_widget(
+            Block::default().style(Style::default().fg(t.fg).bg(bg)),
+            area,
+        );
+    }
+}
 
 fn render_text_popup(title: &str, app: &App, frame: &mut Frame) {
     let popup_area = centered_rect(36, 9, frame.area());
-    frame.render_widget(Clear, popup_area);
+    clear_popup(frame, popup_area);
 
     let popup = Paragraph::new(app.input.as_str())
-        .style(Style::default().fg(theme::FG))
-        .block(popup_block(title))
+        .style(Style::default().fg(theme::current().fg))
+        .block(theme::popup_block(title))
         .wrap(Wrap { trim: true })
         .alignment(Alignment::Center);
 
     frame.render_widget(popup, popup_area);
 }
 
-fn popup_block(title: &str) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme::ACCENT))
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default()
-                .fg(theme::ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ))
-}
-
 pub fn render_app(frame: &mut Frame, app: &App) {
+    // Lay the canvas down before anything else, including the fullscreen views
+    // below. Cells only take the style fields a widget actually sets, so every
+    // unstyled span drawn on top inherits the theme's text colour for free.
+    let t = theme::current();
+    let mut root = Style::default().fg(t.fg);
+    if let Some(bg) = t.bg {
+        root = root.bg(bg);
+    }
+    frame.render_widget(Block::default().style(root), frame.area());
+
     if app.state == AppState::Fullscreen {
         render_fullscreen(frame, app, frame.area());
         return;
@@ -73,51 +86,120 @@ pub fn render_app(frame: &mut Frame, app: &App) {
     match app.state {
         AppState::UserSearchPopup => render_text_popup("Search user", app, frame),
         AppState::PartitionSearchPopup => render_text_popup("Search partition", app, frame),
-        AppState::CancelJobPopup => {
-            let Some(target) = &app.cancel_target else {
-                return;
-            };
-            let popup_area = centered_rect_fixed(44, 7, frame.area());
-            frame.render_widget(Clear, popup_area);
-
-            let body = vec![
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("Cancel job ", Style::default().fg(theme::FG)),
-                    Span::styled(
-                        target.job_id.clone(),
-                        Style::default()
-                            .fg(theme::ACCENT_PINK)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" ?", Style::default().fg(theme::FG)),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled(
-                        "y",
-                        Style::default()
-                            .fg(theme::RUNNING)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" confirm    ", Style::default().fg(theme::MUTED)),
-                    Span::styled(
-                        "n",
-                        Style::default()
-                            .fg(theme::FAILED)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" reject", Style::default().fg(theme::MUTED)),
-                ]),
-            ];
-
-            let popup = Paragraph::new(body)
-                .block(popup_block("Confirm"))
-                .alignment(Alignment::Center);
-            frame.render_widget(popup, popup_area);
-        }
+        AppState::CancelJobPopup => render_cancel_popup(frame, app),
+        AppState::ThemePicker => render_theme_picker(frame, app),
         _ => {}
     }
+}
+
+/// The theme list. Rows carry their own palette as swatches, so a light theme
+/// reads as light before you land on it.
+fn render_theme_picker(frame: &mut Frame, app: &App) {
+    const VISIBLE: usize = 12;
+    const WIDTH: u16 = 46;
+
+    let t = theme::current();
+    let entries = app.themes.entries();
+    let rows = entries.len().min(VISIBLE);
+    let area = centered_rect_fixed(WIDTH, rows as u16 + 2, frame.area());
+    clear_popup(frame, area);
+
+    // Keep the selection in view once the list outgrows the popup.
+    let first = app
+        .theme_picker_index
+        .saturating_sub(rows.saturating_sub(1))
+        .min(entries.len().saturating_sub(rows));
+
+    let lines: Vec<Line> = entries
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(rows)
+        .map(|(i, entry)| {
+            let selected = i == app.theme_picker_index;
+            let base = if selected {
+                Style::default().bg(t.select_bg)
+            } else {
+                Style::default()
+            };
+
+            let mut spans = vec![
+                Span::styled(if selected { "▌ " } else { "  " }, base.fg(t.accent)),
+                Span::styled(
+                    format!("{:<24}", truncate(&entry.name, 24)),
+                    base.fg(if selected { t.fg } else { t.muted }),
+                ),
+            ];
+
+            // The one place colours come from an entry rather than the active
+            // theme, since these preview what selecting it would do.
+            let swatch_bg = entry.theme.bg.unwrap_or(ratatui::style::Color::Reset);
+            for colour in [
+                entry.theme.accent,
+                entry.theme.accent_alt,
+                entry.theme.running,
+                entry.theme.pending,
+                entry.theme.failed,
+            ] {
+                spans.push(Span::styled(
+                    "██",
+                    Style::default().fg(colour).bg(swatch_bg),
+                ));
+            }
+            spans.push(Span::styled(
+                if entry.user { " *" } else { "  " },
+                base.fg(t.muted),
+            ));
+
+            Line::from(spans)
+        })
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(lines).block(theme::popup_block("Theme").padding(Padding::horizontal(1))),
+        area,
+    );
+}
+
+fn render_cancel_popup(frame: &mut Frame, app: &App) {
+    let Some(target) = &app.cancel_target else {
+        return;
+    };
+    let t = theme::current();
+    let popup_area = centered_rect_fixed(44, 7, frame.area());
+    clear_popup(frame, popup_area);
+
+    let body = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Cancel job ", Style::default().fg(t.fg)),
+            Span::styled(
+                target.job_id.clone(),
+                Style::default()
+                    .fg(t.accent_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ?", Style::default().fg(t.fg)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "y",
+                Style::default().fg(t.running).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" confirm    ", Style::default().fg(t.muted)),
+            Span::styled(
+                "n",
+                Style::default().fg(t.failed).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" reject", Style::default().fg(t.muted)),
+        ]),
+    ];
+
+    let popup = Paragraph::new(body)
+        .block(theme::popup_block("Confirm"))
+        .alignment(Alignment::Center);
+    frame.render_widget(popup, popup_area);
 }
 
 /// The original Jobs view: the five-panel dashboard.
@@ -132,6 +214,7 @@ fn render_jobs_dashboard(frame: &mut Frame, app: &App, area: Rect) {
 /// The tab strip for the right of the status bar. Returns the spans and their
 /// width. The width is constant so the right-aligned tabs never shift.
 fn tab_strip(app: &App) -> (Vec<Span<'static>>, u16) {
+    let t = theme::current();
     let mut spans = Vec::new();
 
     for (i, tab) in ActiveTab::ALL.iter().enumerate() {
@@ -141,12 +224,12 @@ fn tab_strip(app: &App) -> (Vec<Span<'static>>, u16) {
             spans.push(Span::styled(
                 label,
                 Style::default()
-                    .bg(theme::ACCENT)
-                    .fg(theme::BADGE_FG)
+                    .bg(t.accent)
+                    .fg(t.badge_fg)
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(label, Style::default().fg(theme::MUTED)));
+            spans.push(Span::styled(label, Style::default().fg(t.muted)));
         }
         spans.push(Span::raw(" ")); // one-space gap between tabs
     }
@@ -278,10 +361,8 @@ pub fn panel_rects(area: Rect) -> PanelRects {
 
 /// The selected job's name as a header pill above the right column.
 fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme::DIM_BORDER));
+    let t = theme::current();
+    let block = theme::bar_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -290,20 +371,18 @@ fn render_right_header(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!(" {} ", job.name),
                 Style::default()
-                    .bg(theme::ACCENT_PINK)
-                    .fg(theme::BADGE_FG)
+                    .bg(t.accent_alt)
+                    .fg(t.badge_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  job {}", job.display_id()),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(t.muted),
             ),
         ]),
         None => Line::styled(
             "no job selected",
-            Style::default()
-                .fg(theme::MUTED)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
         ),
     };
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), inner);
@@ -332,6 +411,7 @@ pub fn update_badge_rect(app: &App, status_area: Rect) -> Option<Rect> {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     // The tabs sit right-aligned on this same line, inline with the title.
     let (tabs, tab_width) = tab_strip(app);
     let cols = Layout::default()
@@ -346,16 +426,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some(error) = &app.error_message {
         let line = Line::from(vec![
-            Span::styled(
-                " ✖ ",
-                Style::default().bg(theme::FAILED).fg(theme::BADGE_FG),
-            ),
+            Span::styled(" ✖ ", Style::default().bg(t.failed).fg(t.badge_fg)),
             Span::styled(
                 format!("  {error}"),
-                Style::default()
-                    .fg(theme::FAILED)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.failed).add_modifier(Modifier::BOLD),
             ),
+        ]);
+        frame.render_widget(Paragraph::new(line), cols[0]);
+        return;
+    }
+
+    // A theme or config problem from startup, held until the first keypress so
+    // it cannot be missed but does not sit there forever.
+    if let Some(warning) = &app.theme_warning {
+        let line = Line::from(vec![
+            Span::styled(" ⚠ ", Style::default().bg(t.pending).fg(t.badge_fg)),
+            Span::styled(format!("  {warning}"), Style::default().fg(t.pending)),
         ]);
         frame.render_widget(Paragraph::new(line), cols[0]);
         return;
@@ -364,8 +450,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut left = vec![Span::styled(
         BRAND_BADGE,
         Style::default()
-            .bg(theme::ACCENT)
-            .fg(theme::BADGE_FG)
+            .bg(t.accent)
+            .fg(t.badge_fg)
             .add_modifier(Modifier::BOLD),
     )];
 
@@ -375,8 +461,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         left.push(Span::styled(
             update_badge_label(latest),
             Style::default()
-                .bg(theme::ACCENT_PINK)
-                .fg(theme::BADGE_FG)
+                .bg(t.accent_alt)
+                .fg(t.badge_fg)
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -384,29 +470,27 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let sep = || Span::raw("   ");
 
     left.push(sep());
-    left.push(Span::styled("user ", Style::default().fg(theme::MUTED)));
+    left.push(Span::styled("user ", Style::default().fg(t.muted)));
     match &app.current_user {
-        Some(user) => left.push(Span::styled(user.clone(), Style::default().fg(theme::FG))),
+        Some(user) => left.push(Span::styled(user.clone(), Style::default().fg(t.fg))),
         None => left.push(Span::styled(
             "all",
-            Style::default()
-                .fg(theme::ACCENT)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )),
     }
 
     if let Some(part) = &app.current_partition {
         left.push(sep());
-        left.push(Span::styled("part ", Style::default().fg(theme::MUTED)));
-        left.push(Span::styled(part.clone(), Style::default().fg(theme::FG)));
+        left.push(Span::styled("part ", Style::default().fg(t.muted)));
+        left.push(Span::styled(part.clone(), Style::default().fg(t.fg)));
     }
 
     left.push(sep());
     left.push(Span::styled(
         format!("{}", app.job_list.jobs.len()),
-        Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
     ));
-    left.push(Span::styled(" jobs", Style::default().fg(theme::MUTED)));
+    left.push(Span::styled(" jobs", Style::default().fg(t.muted)));
 
     // Refresh spinner sits just after the count so it never disturbs the
     // right-aligned tabs when it pops in and out.
@@ -414,7 +498,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         left.push(sep());
         left.push(Span::styled(
             theme::spinner_frame(app.tick),
-            Style::default().fg(theme::ACCENT),
+            Style::default().fg(t.accent),
         ));
     }
 
@@ -486,6 +570,7 @@ fn opt<T>(value: Option<T>, fmt: impl Fn(T) -> String) -> String {
 }
 
 fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let visible = app.visible_jobs();
     let total = app.job_list.jobs.len();
     let filtering = app.state == AppState::FilterInput || !app.filter_query.is_empty();
@@ -542,7 +627,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
     header_str.push_str("STATE");
-    let header = Line::from(Span::styled(header_str, Style::default().fg(theme::MUTED)));
+    let header = Line::from(Span::styled(header_str, Style::default().fg(t.muted)));
     frame.render_widget(Paragraph::new(header), header_row);
 
     let jobs: Vec<ListItem> = visible
@@ -551,18 +636,18 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, job)| {
             let selected = i == app.selected_job_index;
             let base = if selected {
-                Style::default().bg(theme::SELECT_BG)
+                Style::default().bg(t.select_bg)
             } else {
                 Style::default()
             };
 
             let rail = if selected {
-                Span::styled("▌ ", Style::default().fg(theme::ACCENT))
+                Span::styled("▌ ", Style::default().fg(t.accent))
             } else {
                 Span::styled("  ", base)
             };
             let pin = if app.is_pinned(job) {
-                Span::styled("★ ", base.fg(theme::ACCENT_PINK))
+                Span::styled("★ ", base.fg(t.accent_alt))
             } else {
                 Span::styled("  ", base)
             };
@@ -570,8 +655,8 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
             let mut spans = vec![
                 rail,
                 pin,
-                cell(&job.display_id(), cols.id, base.fg(theme::FG)),
-                cell(&job.name, cols.name, base.fg(theme::FG)),
+                cell(&job.display_id(), cols.id, base.fg(t.fg)),
+                cell(&job.name, cols.name, base.fg(t.fg)),
             ];
             let values = [
                 job.partition.as_str(),
@@ -580,7 +665,7 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
             ];
             for ((_, width), value) in optional_cols.iter().zip(values) {
                 if *width > 0 {
-                    spans.push(cell(value, *width, base.fg(theme::MUTED)));
+                    spans.push(cell(value, *width, base.fg(t.muted)));
                 }
             }
             spans.push(theme::state_badge(&job.state));
@@ -678,6 +763,7 @@ fn slice_cells(cells: &[(String, Style)], scroll: usize, win: usize) -> Line<'st
 /// The fullscreen, htop-style jobs table: every column, a focused column moved
 /// with Left/Right, and horizontal scrolling when it is wider than the screen.
 fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let visible = app.visible_jobs();
 
     let rows = Layout::default()
@@ -709,11 +795,11 @@ fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
     for (i, c) in JOB_TABLE_COLS.iter().enumerate() {
         let style = if i == focus {
             Style::default()
-                .fg(theme::ACCENT)
-                .bg(theme::COL_HL)
+                .fg(t.accent)
+                .bg(t.column_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::MUTED)
+            Style::default().fg(t.muted)
         };
         header_cells.push((col(c.title, c.width), style));
     }
@@ -728,13 +814,13 @@ fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, job)| {
             let selected = i == app.selected_job_index;
             let base = if selected {
-                Style::default().bg(theme::SELECT_BG)
+                Style::default().bg(t.select_bg)
             } else {
                 Style::default()
             };
 
             let rail = if selected {
-                ("▌ ".to_string(), base.fg(theme::ACCENT))
+                ("▌ ".to_string(), base.fg(t.accent))
             } else {
                 ("  ".to_string(), base)
             };
@@ -744,13 +830,13 @@ fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
             for (ci, c) in JOB_TABLE_COLS.iter().enumerate() {
                 let mut style = match c.title {
                     "STATE" => base.fg(theme::state_color(&job.state)),
-                    "JOBID" | "NAME" => base.fg(theme::FG),
-                    _ => base.fg(theme::MUTED),
+                    "JOBID" | "NAME" => base.fg(t.fg),
+                    _ => base.fg(t.muted),
                 };
                 if ci == focus {
                     // A background band marks the focused column across every row,
                     // overriding the row-selection background where they cross.
-                    style = style.bg(theme::COL_HL).add_modifier(Modifier::BOLD);
+                    style = style.bg(t.column_bg).add_modifier(Modifier::BOLD);
                 }
                 cells.push((col(&values[ci], c.width), style));
             }
@@ -768,8 +854,9 @@ fn render_jobs_table(frame: &mut Frame, app: &App, area: Rect) {
 
 /// The live filter line above the job list.
 fn filter_line(app: &App) -> Line<'static> {
+    let t = theme::current();
     let typing = app.state == AppState::FilterInput;
-    let accent = if typing { theme::ACCENT } else { theme::MUTED };
+    let accent = if typing { t.accent } else { t.muted };
 
     let mut spans = vec![
         Span::styled(
@@ -778,20 +865,20 @@ fn filter_line(app: &App) -> Line<'static> {
         ),
         Span::styled(
             app.filter_query.clone(),
-            Style::default().fg(if typing { theme::FG } else { theme::MUTED }),
+            Style::default().fg(if typing { t.fg } else { t.muted }),
         ),
     ];
 
     if typing {
-        spans.push(Span::styled("▏", Style::default().fg(theme::ACCENT)));
+        spans.push(Span::styled("▏", Style::default().fg(t.accent)));
         spans.push(Span::styled(
             "   enter to apply, esc to clear",
-            Style::default().fg(theme::DIM_BORDER),
+            Style::default().fg(t.border),
         ));
     } else {
         spans.push(Span::styled(
             "   esc to clear",
-            Style::default().fg(theme::DIM_BORDER),
+            Style::default().fg(t.border),
         ));
     }
 
@@ -808,7 +895,7 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         vec![Line::styled(
             "Select a job to view details",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::current().muted),
         )]
     };
 
@@ -833,7 +920,7 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
             let offset = clamp_scroll(app.logs_scroll, line_count, block.inner(area).height);
             frame.render_widget(
                 Paragraph::new(text)
-                    .style(Style::default().fg(theme::FG))
+                    .style(Style::default().fg(theme::current().fg))
                     .block(block)
                     .wrap(Wrap { trim: true })
                     .scroll((offset, 0)),
@@ -868,7 +955,7 @@ fn render_placeholder(frame: &mut Frame, block: Block<'static>, area: Rect, mess
         Line::styled(
             message.to_string(),
             Style::default()
-                .fg(theme::MUTED)
+                .fg(theme::current().muted)
                 .add_modifier(Modifier::ITALIC),
         ),
     ];
@@ -892,15 +979,22 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("a", "all"),
         ("r", "refresh"),
         ("c", "cancel"),
+        ("T", "theme"),
     ];
-    let usage_hints: &[(&str, &str)] =
-        &[("q", "quit"), ("⇥", "tab"), ("a", "all"), ("r", "refresh")];
+    let usage_hints: &[(&str, &str)] = &[
+        ("q", "quit"),
+        ("⇥", "tab"),
+        ("a", "all"),
+        ("r", "refresh"),
+        ("T", "theme"),
+    ];
     let cluster_hints: &[(&str, &str)] = &[
         ("q", "quit"),
         ("⇥", "tab"),
         ("↑↓", "nav"),
         ("r", "refresh"),
         ("u", "user"),
+        ("T", "theme"),
     ];
     let history_hints: &[(&str, &str)] = &[
         ("q", "quit"),
@@ -909,6 +1003,7 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         ("⏎", "detail"),
         ("r", "refresh"),
         ("u", "user"),
+        ("T", "theme"),
     ];
 
     let pairs: &[(&str, &str)] = match app.state {
@@ -929,14 +1024,10 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         ],
         AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
         AppState::RawLog => &[("↑↓", "scroll"), ("esc", "exit")],
+        AppState::ThemePicker => &[("↑↓", "preview"), ("⏎", "apply"), ("esc", "cancel")],
     };
 
-    let help = Paragraph::new(hint_line(pairs)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::DIM_BORDER)),
-    );
+    let help = Paragraph::new(hint_line(pairs)).block(theme::bar_block());
 
     frame.render_widget(help, area);
 }
@@ -946,7 +1037,10 @@ fn hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (i, (key, label)) in pairs.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled("   ", Style::default().fg(theme::DIM_BORDER)));
+            spans.push(Span::styled(
+                "   ",
+                Style::default().fg(theme::current().border),
+            ));
         }
         spans.extend(theme::key_hint(key, label));
     }
@@ -958,34 +1052,31 @@ const BAR_FILL: &str = "⠿";
 const BAR_TRACK: &str = "⠒";
 
 fn empty_state_lines(quote: crate::ui::quotes::Quote) -> Vec<Line<'static>> {
+    let t = theme::current();
     let (text, author) = quote;
     vec![
         Line::from(""),
         theme::gradient_line("L A Z Y S L U R M"),
-        Line::styled("a tiny SLURM dashboard", Style::default().fg(theme::MUTED)),
+        Line::styled("a tiny SLURM dashboard", Style::default().fg(t.muted)),
         Line::from(""),
-        Line::styled("No jobs found", Style::default().fg(theme::FG)),
+        Line::styled("No jobs found", Style::default().fg(t.fg)),
         Line::from(""),
         Line::styled(
             "Try: lazyslurm --user <username>",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(t.muted),
         ),
         Line::styled(
             "or check that SLURM is reachable.",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(t.muted),
         ),
         Line::from(""),
         Line::styled(
             format!("\"{text}\""),
-            Style::default()
-                .fg(theme::MUTED)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
         ),
         Line::from(Span::styled(
             format!("— {author}"),
-            Style::default()
-                .fg(theme::MUTED)
-                .add_modifier(Modifier::ITALIC),
+            Style::default().fg(t.muted).add_modifier(Modifier::ITALIC),
         ))
         .alignment(Alignment::Right),
     ]
@@ -993,8 +1084,11 @@ fn empty_state_lines(quote: crate::ui::quotes::Quote) -> Vec<Line<'static>> {
 
 fn kv(key: &str, value: String) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{key:<11}"), Style::default().fg(theme::MUTED)),
-        Span::styled(value, Style::default().fg(theme::FG)),
+        Span::styled(
+            format!("{key:<11}"),
+            Style::default().fg(theme::current().muted),
+        ),
+        Span::styled(value, Style::default().fg(theme::current().fg)),
     ])
 }
 
@@ -1022,12 +1116,12 @@ fn progress_line(
 ) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!("{label:<11}"),
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::current().muted),
     )];
     spans.extend(mini_bar(filled, total, 12, color));
     spans.push(Span::styled(
         format!("  {suffix}"),
-        Style::default().fg(theme::FG),
+        Style::default().fg(theme::current().fg),
     ));
     Line::from(spans)
 }
@@ -1052,6 +1146,7 @@ fn sparkline(deltas: &[u64]) -> String {
 /// Progress rows derived from live signals: wall-clock budget, array task
 /// aggregate, and a log-activity heartbeat. Only shown for running jobs.
 fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
+    let t = theme::current();
     let mut out = Vec::new();
     if !job.is_running() {
         return out;
@@ -1061,11 +1156,11 @@ fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
         (job.walltime_fraction(), &job.time_used, &job.time_limit)
     {
         let color = if frac < 0.75 {
-            theme::RUNNING
+            t.running
         } else if frac < 0.9 {
-            theme::PENDING
+            t.pending
         } else {
-            theme::FAILED
+            t.failed
         };
         let pct = (frac * 100.0).round() as u32;
         out.push(progress_line(
@@ -1096,7 +1191,7 @@ fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
                 "Array",
                 running as usize,
                 total as usize,
-                theme::RUNNING,
+                t.running,
                 format!("{running} run · {pending} pend"),
             ));
         }
@@ -1110,14 +1205,14 @@ fn job_progress_lines(app: &App, job: &Job) -> Vec<Line<'static>> {
             .collect();
         let flowing = deltas.iter().rev().take(3).any(|&d| d > 0);
         let (note, color) = if flowing {
-            (" writing", theme::RUNNING)
+            (" writing", t.running)
         } else {
-            (" quiet", theme::MUTED)
+            (" quiet", t.muted)
         };
         out.push(Line::from(vec![
-            Span::styled("Activity   ", Style::default().fg(theme::MUTED)),
+            Span::styled("Activity   ", Style::default().fg(t.muted)),
             Span::styled(sparkline(&deltas), Style::default().fg(color)),
-            Span::styled(note, Style::default().fg(theme::MUTED)),
+            Span::styled(note, Style::default().fg(t.muted)),
         ]));
     }
 
@@ -1208,6 +1303,7 @@ fn render_fullscreen(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn fullscreen_header(app: &App) -> Line<'static> {
+    let t = theme::current();
     let title = match app.fullscreen_panel {
         FocusPanel::Jobs => "Jobs",
         FocusPanel::Details => "Details",
@@ -1217,19 +1313,19 @@ fn fullscreen_header(app: &App) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!(" {title} "),
         Style::default()
-            .bg(theme::ACCENT)
-            .fg(theme::BADGE_FG)
+            .bg(t.accent)
+            .fg(t.badge_fg)
             .add_modifier(Modifier::BOLD),
     )];
 
     if let Some(job) = &app.fullscreen_job {
         spans.push(Span::styled(
             format!("  {}  ", job.name),
-            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             format!("job {}", job.display_id()),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(t.muted),
         ));
     }
 
@@ -1237,20 +1333,16 @@ fn fullscreen_header(app: &App) -> Line<'static> {
         if app.log_follow {
             spans.push(Span::styled(
                 format!("   {} ", theme::spinner_frame(app.tick)),
-                Style::default().fg(theme::ACCENT),
+                Style::default().fg(t.accent),
             ));
             spans.push(Span::styled(
                 "[FOLLOWING]",
-                Style::default()
-                    .fg(theme::RUNNING)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.running).add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::styled(
                 "    [PAUSED]",
-                Style::default()
-                    .fg(theme::PENDING)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.pending).add_modifier(Modifier::BOLD),
             ));
         }
     }
@@ -1264,7 +1356,7 @@ fn render_fullscreen_details(frame: &mut Frame, app: &App, area: Rect) {
         Some(job) => job_detail_lines(app, job),
         None => vec![Line::styled(
             "No job selected",
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::current().muted),
         )],
     };
     let offset = clamp_scroll(app.fullscreen_scroll, body.len(), block.inner(area).height);
@@ -1294,7 +1386,7 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
             };
             frame.render_widget(
                 Paragraph::new(text)
-                    .style(Style::default().fg(theme::FG))
+                    .style(Style::default().fg(theme::current().fg))
                     .block(block)
                     .wrap(Wrap { trim: false })
                     .scroll((offset, 0)),
@@ -1313,6 +1405,7 @@ fn render_fullscreen_logs(frame: &mut Frame, app: &App, area: Rect) {
 /// Plain, borderless, no-wrap log view so a terminal selection stays clean
 /// (one screen row per log line). Mouse capture is released in the event loop.
 fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -1321,8 +1414,8 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
     let mut header = vec![Span::styled(
         " RAW ",
         Style::default()
-            .bg(theme::ACCENT_PINK)
-            .fg(theme::BADGE_FG)
+            .bg(t.accent_alt)
+            .fg(t.badge_fg)
             .add_modifier(Modifier::BOLD),
     )];
 
@@ -1330,11 +1423,11 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
         LogRead::Lines { path, text } => {
             header.push(Span::styled(
                 format!("  {path}"),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(t.muted),
             ));
             header.push(Span::styled(
                 "   esc to exit",
-                Style::default().fg(theme::DIM_BORDER),
+                Style::default().fg(t.border),
             ));
             frame.render_widget(Paragraph::new(Line::from(header)), rows[0]);
 
@@ -1347,7 +1440,7 @@ fn render_raw_log(frame: &mut Frame, app: &App, area: Rect) {
             };
             frame.render_widget(
                 Paragraph::new(text)
-                    .style(Style::default().fg(theme::FG))
+                    .style(Style::default().fg(t.fg))
                     .scroll((offset, 0)),
                 rows[1],
             );
@@ -1371,7 +1464,7 @@ fn centered_message(frame: &mut Frame, area: Rect, msg: &str) {
         Line::styled(
             msg.to_string(),
             Style::default()
-                .fg(theme::MUTED)
+                .fg(theme::current().muted)
                 .add_modifier(Modifier::ITALIC),
         ),
     ];
@@ -1406,7 +1499,7 @@ fn render_cluster_list(
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             header.to_string(),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(theme::current().muted),
         ))),
         rows[0],
     );
@@ -1439,12 +1532,12 @@ fn cluster_message<'a>(
 /// The leading selection rail plus the base row style, shared by every list.
 fn row_base(selected: bool) -> (Span<'static>, Style) {
     let base = if selected {
-        Style::default().bg(theme::SELECT_BG)
+        Style::default().bg(theme::current().select_bg)
     } else {
         Style::default()
     };
     let rail = if selected {
-        Span::styled("▌ ", Style::default().fg(theme::ACCENT))
+        Span::styled("▌ ", Style::default().fg(theme::current().accent))
     } else {
         Span::styled("  ", base)
     };
@@ -1469,7 +1562,7 @@ fn mini_bar(
         Span::styled(BAR_FILL.repeat(cells), Style::default().fg(color)),
         Span::styled(
             BAR_TRACK.repeat(width - cells),
-            Style::default().fg(theme::DIM_BORDER),
+            Style::default().fg(theme::current().border),
         ),
     ]
 }
@@ -1483,20 +1576,22 @@ fn fmt_gb(mb: Option<u64>) -> String {
 }
 
 fn node_state_color(node: &Node) -> ratatui::style::Color {
+    let t = theme::current();
     if node.is_unavailable() {
-        return theme::FAILED;
+        return t.failed;
     }
     let s = node.state.to_lowercase();
     if s.contains("idle") {
-        theme::RUNNING
+        t.running
     } else if s.contains("alloc") || s.contains("mix") {
-        theme::COMPLETED
+        t.completed
     } else {
-        theme::MUTED
+        t.muted
     }
 }
 
 fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     // These two columns hold numbers, so they can't be truncated like the
     // text columns. Size them to the widest value (with the old widths as
     // minimums) so big CPU/RAM figures keep a space before the next column
@@ -1533,7 +1628,7 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 rail,
-                cell(&node.name, 18, base.fg(theme::FG)),
+                cell(&node.name, 18, base.fg(t.fg)),
                 cell(&node.state, 10, base.fg(color)),
             ];
             spans.extend(mini_bar(
@@ -1547,23 +1642,19 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
                     " {:<cpu_w$}",
                     format!("{}/{}", node.cpus_alloc, node.cpus_total)
                 ),
-                base.fg(theme::MUTED),
+                base.fg(t.muted),
             ));
             spans.push(Span::styled(
                 format!(
                     "{:<mem_w$}",
                     format!("{}/{}", fmt_gb(node.free_mem_mb), fmt_gb(node.memory_mb))
                 ),
-                base.fg(theme::MUTED),
+                base.fg(t.muted),
             ));
-            spans.push(cell(
-                node.gres.as_deref().unwrap_or("-"),
-                20,
-                base.fg(theme::FG),
-            ));
+            spans.push(cell(node.gres.as_deref().unwrap_or("-"), 20, base.fg(t.fg)));
             spans.push(Span::styled(
                 truncate(&node.partition, 12),
-                base.fg(theme::MUTED),
+                base.fg(t.muted),
             ));
 
             ListItem::new(Line::from(spans)).style(base)
@@ -1589,6 +1680,7 @@ fn render_nodes_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let header = format!(
         "  {:<18}{:<8}{:<14}{:<10}TIMELIMIT",
         "PARTITION", "AVAIL", "NODES", "i/t"
@@ -1609,28 +1701,28 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             let mut spans = vec![
                 rail,
-                cell(&name, 18, base.fg(theme::FG)),
+                cell(&name, 18, base.fg(t.fg)),
                 cell(
                     &part.availability,
                     8,
-                    base.fg(if up { theme::RUNNING } else { theme::FAILED }),
+                    base.fg(if up { t.running } else { t.failed }),
                 ),
             ];
             spans.extend(mini_bar(
                 part.nodes_idle as usize,
                 part.nodes_total as usize,
                 6,
-                theme::RUNNING,
+                t.running,
             ));
             spans.push(Span::styled(
                 format!(
                     " {:<7}",
                     format!("{}/{}", part.nodes_idle, part.nodes_total)
                 ),
-                base.fg(theme::MUTED),
+                base.fg(t.muted),
             ));
-            spans.push(cell("", 10, base.fg(theme::MUTED)));
-            spans.push(Span::styled(part.time_limit.clone(), base.fg(theme::FG)));
+            spans.push(cell("", 10, base.fg(t.muted)));
+            spans.push(Span::styled(part.time_limit.clone(), base.fg(t.fg)));
 
             ListItem::new(Line::from(spans)).style(base)
         })
@@ -1655,10 +1747,11 @@ fn render_partitions_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn fairshare_color(band: Option<FairShareBand>) -> ratatui::style::Color {
+    let t = theme::current();
     match band {
-        Some(FairShareBand::Penalised) => theme::PENDING,
-        Some(FairShareBand::Boosted) => theme::RUNNING,
-        _ => theme::MUTED,
+        Some(FairShareBand::Penalised) => t.pending,
+        Some(FairShareBand::Boosted) => t.running,
+        _ => t.muted,
     }
 }
 
@@ -1666,10 +1759,10 @@ fn fairshare_color(band: Option<FairShareBand>) -> ratatui::style::Color {
 /// value and the verdict word emphasised.
 fn fairshare_reading(row: Option<&FairShareEntry>) -> Line<'static> {
     let muted = Style::default()
-        .fg(theme::MUTED)
+        .fg(theme::current().muted)
         .add_modifier(Modifier::ITALIC);
     let strong = Style::default()
-        .fg(theme::FG)
+        .fg(theme::current().fg)
         .add_modifier(Modifier::BOLD | Modifier::ITALIC);
 
     let Some((row, f)) = row.and_then(|r| r.fair_share.map(|f| (r, f))) else {
@@ -1701,6 +1794,7 @@ fn fairshare_reading(row: Option<&FairShareEntry>) -> Line<'static> {
 }
 
 fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let block = theme::panel("Usage", true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1718,7 +1812,7 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
     let heading = |text: &str| {
         Line::styled(
             text.to_string(),
-            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
         )
     };
 
@@ -1730,7 +1824,7 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
                 "  {:<12}{:<12}{:>12}{:>14}{:>12}",
                 "USER", "ACCOUNT", "RAWUSAGE", "EFFECTVUSAGE", "FAIRSHARE"
             ),
-            Style::default().fg(theme::MUTED),
+            Style::default().fg(t.muted),
         ),
     ];
 
@@ -1738,16 +1832,16 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  {:<12}", truncate(&e.user, 11)),
-                Style::default().fg(theme::FG),
+                Style::default().fg(t.fg),
             ),
-            cell(&e.account, 12, Style::default().fg(theme::MUTED)),
+            cell(&e.account, 12, Style::default().fg(t.muted)),
             Span::styled(
                 format!("{:>12}", opt(e.raw_usage, |u| u.to_string())),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(t.muted),
             ),
             Span::styled(
                 format!("{:>14}", opt(e.effectv_usage, |u| format!("{u:.6}"))),
-                Style::default().fg(theme::MUTED),
+                Style::default().fg(t.muted),
             ),
             Span::styled(
                 format!("{:>12}", opt(e.fair_share, |u| format!("{u:.4}"))),
@@ -1771,6 +1865,7 @@ fn render_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = theme::current();
     let header = format!(
         "  {:<12}{:<18}{:<12}{:<8}{:<12}ENDED",
         "JOBID", "NAME", "STATE", "EXIT", "ELAPSED"
@@ -1786,12 +1881,12 @@ fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 rail,
-                cell(&entry.job_id, 12, base.fg(theme::FG)),
-                cell(&entry.name, 18, base.fg(theme::FG)),
+                cell(&entry.job_id, 12, base.fg(t.fg)),
+                cell(&entry.name, 18, base.fg(t.fg)),
                 cell(&entry.state, 12, base.fg(color)),
-                cell(&entry.exit_code, 8, base.fg(theme::MUTED)),
-                cell(&entry.elapsed, 12, base.fg(theme::MUTED)),
-                Span::styled(truncate(&entry.end, 19), base.fg(theme::MUTED)),
+                cell(&entry.exit_code, 8, base.fg(t.muted)),
+                cell(&entry.elapsed, 12, base.fg(t.muted)),
+                Span::styled(truncate(&entry.end, 19), base.fg(t.muted)),
             ]))
             .style(base)
         })
@@ -1822,24 +1917,26 @@ fn render_history_tab(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn history_color(entry: &AcctEntry) -> ratatui::style::Color {
+    let t = theme::current();
     let s = entry.state.to_uppercase();
     if s.starts_with("RUNNING") || s.starts_with("PENDING") {
-        theme::RUNNING
+        t.running
     } else if entry.succeeded() {
-        theme::COMPLETED
+        t.completed
     } else {
-        theme::FAILED
+        t.failed
     }
 }
 
 fn acct_state_color(state: &str, exit_code: &str) -> ratatui::style::Color {
+    let t = theme::current();
     let s = state.to_uppercase();
     if s.starts_with("RUNNING") || s.starts_with("PENDING") {
-        theme::RUNNING
+        t.running
     } else if exit_code == "0:0" && s.starts_with("COMPLETED") {
-        theme::COMPLETED
+        t.completed
     } else {
-        theme::FAILED
+        t.failed
     }
 }
 
@@ -1891,11 +1988,12 @@ fn render_history_detail(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn history_detail_header(app: &App) -> Line<'static> {
+    let t = theme::current();
     let mut spans = vec![Span::styled(
         " History ",
         Style::default()
-            .bg(theme::ACCENT)
-            .fg(theme::BADGE_FG)
+            .bg(t.accent)
+            .fg(t.badge_fg)
             .add_modifier(Modifier::BOLD),
     )];
 
@@ -1909,18 +2007,18 @@ fn history_detail_header(app: &App) -> Line<'static> {
     if let Some(detail) = &app.history_detail {
         spans.push(Span::styled(
             format!("  {}  ", detail.name),
-            Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.fg).add_modifier(Modifier::BOLD),
         ));
     }
     spans.push(Span::styled(
         format!("job {id}"),
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(t.muted),
     ));
 
     if app.history_detail_loading {
         spans.push(Span::styled(
             format!("   {} ", theme::spinner_frame(app.tick)),
-            Style::default().fg(theme::ACCENT),
+            Style::default().fg(t.accent),
         ));
     }
 
@@ -1932,7 +2030,7 @@ fn acct_detail_lines(d: &AcctDetail) -> Vec<Line<'static>> {
         format!(" ● {} ", d.state),
         Style::default()
             .bg(acct_state_color(&d.state, &d.exit_code))
-            .fg(theme::BADGE_FG)
+            .fg(theme::current().badge_fg)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -1972,7 +2070,7 @@ fn render_history_detail_logs(frame: &mut Frame, app: &App, detail: &AcctDetail,
             let offset = clamp_scroll(app.history_detail_scroll, total, block.inner(area).height);
             frame.render_widget(
                 Paragraph::new(content)
-                    .style(Style::default().fg(theme::FG))
+                    .style(Style::default().fg(theme::current().fg))
                     .block(block)
                     .wrap(Wrap { trim: false })
                     .scroll((offset, 0)),
@@ -2014,7 +2112,7 @@ fn logs_panel(path: &str, focused: bool, width: u16) -> Block<'static> {
     let shown = truncate_left(path, budget);
     theme::panel("Logs", focused).title(Span::styled(
         format!("· {shown} "),
-        Style::default().fg(theme::MUTED),
+        Style::default().fg(theme::current().muted),
     ))
 }
 

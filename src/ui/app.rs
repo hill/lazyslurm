@@ -5,6 +5,10 @@ use tokio::sync::mpsc;
 
 use crate::models::{AcctDetail, AcctEntry, FairShareEntry, Job, JobList, Node, Partition};
 use crate::slurm::{SlurmExecutor, SlurmParser, SlurmProcess};
+use crate::ui::theme::{
+    self, Theme,
+    load::{DEFAULT_THEME, ThemeRegistry},
+};
 
 /// Number of columns in the fullscreen jobs table; the ceiling for `jobs_col`.
 pub const JOBS_TABLE_COLUMNS: usize = 7;
@@ -71,6 +75,8 @@ pub enum AppState {
     HistoryDetail,
     /// Typing into the live job-list filter on the Jobs tab.
     FilterInput,
+    /// Browsing themes, with the highlighted one applied live behind the popup.
+    ThemePicker,
     /// Plain, borderless log view with mouse capture released so the terminal
     /// can select text.
     RawLog,
@@ -156,6 +162,15 @@ pub struct App {
     /// alongside the job id they belong to so a change of selection resets them.
     pub activity_job_id: Option<String>,
     pub activity: std::collections::VecDeque<u64>,
+    /// Every theme the picker can offer.
+    pub themes: ThemeRegistry,
+    pub theme_name: String,
+    pub theme_picker_index: usize,
+    /// What to put back if the picker is dismissed rather than confirmed.
+    theme_picker_saved: Option<(String, Theme)>,
+    /// A theme or config problem from startup. Kept apart from `error_message`,
+    /// which the next successful fetch clears a second later.
+    pub theme_warning: Option<String>,
 }
 
 impl App {
@@ -222,7 +237,66 @@ impl App {
             raw_log_origin: AppState::Normal,
             activity_job_id: None,
             activity: std::collections::VecDeque::new(),
+            // Built-ins only, so constructing an App never touches the disk.
+            // `main` swaps in the user's themes once it has read them.
+            themes: ThemeRegistry::builtin_only(),
+            theme_name: DEFAULT_THEME.to_string(),
+            theme_picker_index: 0,
+            theme_picker_saved: None,
+            theme_warning: None,
         }
+    }
+
+    /// Adopt the themes found on disk, along with whichever one is active.
+    pub fn set_themes(&mut self, themes: ThemeRegistry, active: String) {
+        self.themes = themes;
+        self.theme_name = active;
+    }
+
+    pub fn open_theme_picker(&mut self) {
+        self.theme_picker_saved = Some((self.theme_name.clone(), theme::current()));
+        self.theme_picker_index = self.themes.index_of(&self.theme_name).unwrap_or(0);
+        self.state = AppState::ThemePicker;
+    }
+
+    /// Apply the highlighted theme straight away. The dashboard behind the
+    /// popup redraws in it, so browsing is the preview.
+    fn preview_theme(&mut self) {
+        if let Some(entry) = self.themes.entries().get(self.theme_picker_index) {
+            theme::set(entry.theme);
+        }
+    }
+
+    pub fn theme_picker_next(&mut self) {
+        self.theme_picker_index = next_index(self.theme_picker_index, self.themes.entries().len());
+        self.preview_theme();
+    }
+
+    pub fn theme_picker_prev(&mut self) {
+        self.theme_picker_index = self.theme_picker_index.saturating_sub(1);
+        self.preview_theme();
+    }
+
+    pub fn commit_theme(&mut self) {
+        if let Some(entry) = self.themes.entries().get(self.theme_picker_index) {
+            self.theme_name = entry.name.clone();
+            theme::set(entry.theme);
+            // A read-only home is real on locked-down clusters, so a failed
+            // save costs you the persistence, not the theme.
+            if let Err(err) = crate::utils::config::persist_theme(&self.theme_name) {
+                self.error_message = Some(format!("theme applied but not saved: {err}"));
+            }
+        }
+        self.theme_picker_saved = None;
+        self.state = AppState::Normal;
+    }
+
+    pub fn cancel_theme(&mut self) {
+        if let Some((name, theme)) = self.theme_picker_saved.take() {
+            self.theme_name = name;
+            theme::set(theme);
+        }
+        self.state = AppState::Normal;
     }
 
     /// Sample the selected job's log size for the activity heartbeat. Resets the
