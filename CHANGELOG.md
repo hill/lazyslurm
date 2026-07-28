@@ -3,6 +3,24 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Themes, with nine shipped: `lazyslurm` (the default), `gruvbox-dark`, `gruvbox-light`,
+  `catppuccin-mocha`, `catppuccin-latte`, `nord`, `dracula`, `tokyonight` and
+  `tokyonight-day`. Press `T` for a picker that applies each one as you move through it
+- Pick a theme with `--theme`, the `LAZYSLURM_THEME` environment variable, or
+  `theme = "..."` in `~/.config/lazyslurm/config.toml`. Confirming in the picker writes
+  the choice to that file, leaving the rest of it untouched
+- Custom themes from `~/.config/lazyslurm/themes/*.toml`, named after the file and able
+  to `extends` a built-in and override only the slots you care about
+- `--list-themes` and `--print-theme`, the latter emitting the active palette as a
+  starting point for your own
+
+### Changed
+- Light themes paint an opaque background. The default theme still leaves your terminal's
+  background alone, transparency included
+
 ## [0.4.0] - 2026-07-25
 
 ### Added
