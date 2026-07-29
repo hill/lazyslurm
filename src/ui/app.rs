@@ -816,13 +816,15 @@ impl App {
         // Fetch on demand — result arrives via ScontrolEnriched event.
         let executor = self.executor.clone();
         let sender = self.event_sender.clone();
-        tokio::spawn(async move {
-            if let Ok(output) = executor.scontrol_show_job(&job_id).await
-                && let Ok(fields) = SlurmParser::parse_scontrol_output(&output)
-            {
-                let _ = sender.send(AppEvent::ScontrolEnriched { job_id, fields });
-            }
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Ok(output) = executor.scontrol_show_job(&job_id).await
+                    && let Ok(fields) = SlurmParser::parse_scontrol_output(&output)
+                {
+                    let _ = sender.send(AppEvent::ScontrolEnriched { job_id, fields });
+                }
+            });
+        }
     }
 
     /// Apply freshly-fetched scontrol data to the currently selected job if
