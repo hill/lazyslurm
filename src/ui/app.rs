@@ -27,6 +27,11 @@ pub enum AppEvent {
     FairShareFetched(Result<Vec<FairShareEntry>, String>),
     /// A newer stable version if one exists on crates.io, else `None`.
     UpdateCheckFetched(Option<String>),
+    /// scontrol fields for a single job, fetched on demand when selected.
+    ScontrolEnriched {
+        job_id: String,
+        fields: std::collections::HashMap<String, String>,
+    },
 }
 
 /// The top-level views, switched with Tab or the number keys. Jobs is the
@@ -171,6 +176,11 @@ pub struct App {
     /// A theme or config problem from startup. Kept apart from `error_message`,
     /// which the next successful fetch clears a second later.
     pub theme_warning: Option<String>,
+    /// Cached scontrol fields by job id so selecting a job re-applies
+    /// StdOut / StdErr / WorkDir without re-fetching on every refresh.
+    pub scontrol_cache: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    /// Insertion order for FIFO eviction when the cache exceeds its cap.
+    scontrol_cache_order: std::collections::VecDeque<String>,
 }
 
 impl App {
@@ -244,6 +254,8 @@ impl App {
             theme_picker_index: 0,
             theme_picker_saved: None,
             theme_warning: None,
+            scontrol_cache: std::collections::HashMap::new(),
+            scontrol_cache_order: std::collections::VecDeque::new(),
         }
     }
 
@@ -657,6 +669,9 @@ impl App {
                 AppEvent::UpdateCheckFetched(latest) => {
                     self.update_available = latest;
                 }
+                AppEvent::ScontrolEnriched { job_id, fields } => {
+                    self.apply_scontrol_enriched(job_id, fields);
+                }
             }
         }
     }
@@ -769,9 +784,77 @@ impl App {
             .visible_jobs()
             .get(self.selected_job_index)
             .map(|job| (*job).clone());
-        // New selection resets the inline panel scroll.
         self.details_scroll = 0;
         self.logs_scroll = 0;
+
+        // Re-apply cached scontrol data, or fetch it on demand if missing.
+        if self.selected_job.is_some()
+            && self.selected_job.as_ref().is_none_or(|j| j.std_out.is_none())
+        {
+            self.enrich_selected_from_cache();
+        }
+
+        // Keep the fullscreen snapshot in sync when navigating jobs there.
+        if self.state == AppState::Fullscreen
+            && self.fullscreen_panel == FocusPanel::Jobs
+        {
+            self.fullscreen_job = self.selected_job.clone();
+        }
+    }
+
+    /// Check the scontrol cache for the selected job; if found, apply the
+    /// stored fields. If not, spawn an async fetch that populates the cache.
+    fn enrich_selected_from_cache(&mut self) {
+        let Some(job) = &mut self.selected_job else { return };
+        let job_id = job.job_id.clone();
+
+        if let Some(fields) = self.scontrol_cache.get(&job_id) {
+            SlurmParser::enhance_job_with_scontrol_data(job, fields.clone());
+            return;
+        }
+
+        // Fetch on demand — result arrives via ScontrolEnriched event.
+        // Only spawn when a tokio runtime is active (skipped in unit tests).
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let executor = self.executor.clone();
+            let sender = self.event_sender.clone();
+            tokio::spawn(async move {
+                if let Ok(output) = executor.scontrol_show_job(&job_id).await
+                    && let Ok(fields) = SlurmParser::parse_scontrol_output(&output)
+                {
+                    let _ = sender.send(AppEvent::ScontrolEnriched { job_id, fields });
+                }
+            });
+        }
+    }
+
+    /// Apply freshly-fetched scontrol data to the currently selected job if
+    /// the ids match, and add it to the cache with FIFO eviction at cap.
+    fn apply_scontrol_enriched(
+        &mut self,
+        job_id: String,
+        fields: std::collections::HashMap<String, String>,
+    ) {
+        self.scontrol_cache.insert(job_id.clone(), fields.clone());
+        // Move to front (newest); remove from old position if re-inserted.
+        if let Some(pos) = self.scontrol_cache_order.iter().position(|id| *id == job_id) {
+            self.scontrol_cache_order.remove(pos);
+        }
+        self.scontrol_cache_order.push_front(job_id.clone());
+
+        // Evict oldest when over cap.
+        const CACHE_CAP: usize = 20;
+        while self.scontrol_cache_order.len() > CACHE_CAP {
+            if let Some(old) = self.scontrol_cache_order.pop_back() {
+                self.scontrol_cache.remove(&old);
+            }
+        }
+
+        if self.selected_job.as_ref().is_some_and(|j| j.job_id == job_id)
+            && let Some(job) = &mut self.selected_job
+        {
+            SlurmParser::enhance_job_with_scontrol_data(job, fields);
+        }
     }
 
     /// Enter filter-typing mode. The list filters live as the query changes.
@@ -917,7 +1000,7 @@ impl App {
         let Some(detail) = self.history_detail.as_ref() else {
             return;
         };
-        let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.job_id);
+        let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.std_out, &detail.job_id);
         self.enter_raw_log(paths);
     }
 

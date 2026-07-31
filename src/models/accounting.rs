@@ -40,4 +40,5 @@ pub struct AcctDetail {
     pub end: String,
     pub elapsed: String,
     pub work_dir: String,
+    pub std_out: String,
 }
