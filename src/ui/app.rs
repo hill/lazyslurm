@@ -178,7 +178,8 @@ pub struct App {
     pub theme_warning: Option<String>,
     /// Cached scontrol fields by job id so selecting a job re-applies
     /// StdOut / StdErr / WorkDir without re-fetching on every refresh.
-    pub scontrol_cache: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    pub scontrol_cache:
+        std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     /// Insertion order for FIFO eviction when the cache exceeds its cap.
     scontrol_cache_order: std::collections::VecDeque<String>,
 }
@@ -789,15 +790,16 @@ impl App {
 
         // Re-apply cached scontrol data, or fetch it on demand if missing.
         if self.selected_job.is_some()
-            && self.selected_job.as_ref().is_none_or(|j| j.std_out.is_none())
+            && self
+                .selected_job
+                .as_ref()
+                .is_none_or(|j| j.std_out.is_none())
         {
             self.enrich_selected_from_cache();
         }
 
         // Keep the fullscreen snapshot in sync when navigating jobs there.
-        if self.state == AppState::Fullscreen
-            && self.fullscreen_panel == FocusPanel::Jobs
-        {
+        if self.state == AppState::Fullscreen && self.fullscreen_panel == FocusPanel::Jobs {
             self.fullscreen_job = self.selected_job.clone();
         }
     }
@@ -805,7 +807,9 @@ impl App {
     /// Check the scontrol cache for the selected job; if found, apply the
     /// stored fields. If not, spawn an async fetch that populates the cache.
     fn enrich_selected_from_cache(&mut self) {
-        let Some(job) = &mut self.selected_job else { return };
+        let Some(job) = &mut self.selected_job else {
+            return;
+        };
         let job_id = job.job_id.clone();
 
         if let Some(fields) = self.scontrol_cache.get(&job_id) {
@@ -836,7 +840,11 @@ impl App {
     ) {
         self.scontrol_cache.insert(job_id.clone(), fields.clone());
         // Move to front (newest); remove from old position if re-inserted.
-        if let Some(pos) = self.scontrol_cache_order.iter().position(|id| *id == job_id) {
+        if let Some(pos) = self
+            .scontrol_cache_order
+            .iter()
+            .position(|id| *id == job_id)
+        {
             self.scontrol_cache_order.remove(pos);
         }
         self.scontrol_cache_order.push_front(job_id.clone());
@@ -849,7 +857,10 @@ impl App {
             }
         }
 
-        if self.selected_job.as_ref().is_some_and(|j| j.job_id == job_id)
+        if self
+            .selected_job
+            .as_ref()
+            .is_some_and(|j| j.job_id == job_id)
             && let Some(job) = &mut self.selected_job
         {
             SlurmParser::enhance_job_with_scontrol_data(job, fields);
@@ -999,7 +1010,8 @@ impl App {
         let Some(detail) = self.history_detail.as_ref() else {
             return;
         };
-        let paths = SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.std_out, &detail.job_id);
+        let paths =
+            SlurmParser::get_acct_log_paths(&detail.work_dir, &detail.std_out, &detail.job_id);
         self.enter_raw_log(paths);
     }
 
