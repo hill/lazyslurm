@@ -789,7 +789,7 @@ impl App {
 
         // Re-apply cached scontrol data, or fetch it on demand if missing.
         if self.selected_job.is_some()
-            && self.selected_job.as_ref().map_or(true, |j| j.std_out.is_none())
+            && self.selected_job.as_ref().is_none_or(|j| j.std_out.is_none())
         {
             self.enrich_selected_from_cache();
         }
@@ -813,11 +813,11 @@ impl App {
             return;
         }
 
-        // Fetch on demand — result arrives via ScontrolEnriched event.
-        let executor = self.executor.clone();
-        let sender = self.event_sender.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
+        // Only spawn when a tokio runtime is active (skipped in unit tests).
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let executor = self.executor.clone();
+            let sender = self.event_sender.clone();
+            tokio::spawn(async move {
                 if let Ok(output) = executor.scontrol_show_job(&job_id).await
                     && let Ok(fields) = SlurmParser::parse_scontrol_output(&output)
                 {
@@ -849,10 +849,10 @@ impl App {
             }
         }
 
-        if self.selected_job.as_ref().map_or(false, |j| j.job_id == job_id) {
-            if let Some(job) = &mut self.selected_job {
-                SlurmParser::enhance_job_with_scontrol_data(job, fields);
-            }
+        if self.selected_job.as_ref().is_some_and(|j| j.job_id == job_id)
+            && let Some(job) = &mut self.selected_job
+        {
+            SlurmParser::enhance_job_with_scontrol_data(job, fields);
         }
     }
 
