@@ -88,8 +88,49 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         AppState::PartitionSearchPopup => render_text_popup("Search partition", app, frame),
         AppState::CancelJobPopup => render_cancel_popup(frame, app),
         AppState::ThemePicker => render_theme_picker(frame, app),
+        AppState::UpdatePopup => render_update_popup(frame, app),
         _ => {}
     }
+}
+
+/// Shown when the badge is clicked on a host with no browser. The URL sits on
+/// its own line so a terminal that linkifies text can offer it, and so it can
+/// be selected by hand when the clipboard escape goes nowhere.
+fn render_update_popup(frame: &mut Frame, app: &App) {
+    let t = theme::current();
+    let area = centered_rect_fixed(52, 9, frame.area());
+    clear_popup(frame, area);
+
+    let headline = match &app.update_available {
+        Some(latest) => format!("lazyslurm v{latest} is on crates.io"),
+        None => "lazyslurm is on crates.io".to_string(),
+    };
+
+    let body = vec![
+        Line::from(""),
+        Line::from(Span::styled(headline, Style::default().fg(t.fg))),
+        Line::from(""),
+        Line::from(Span::styled(
+            crate::update::CRATES_URL,
+            Style::default()
+                .fg(t.accent_alt)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "No browser on this host, so the link went to",
+            Style::default().fg(t.muted),
+        )),
+        Line::from(Span::styled(
+            "your terminal's clipboard instead",
+            Style::default().fg(t.muted),
+        )),
+    ];
+
+    let popup = Paragraph::new(body)
+        .block(theme::popup_block("Update"))
+        .alignment(Alignment::Center);
+    frame.render_widget(popup, area);
 }
 
 /// The theme list. Rows carry their own palette as swatches, so a light theme
@@ -1025,6 +1066,7 @@ fn render_help_bar(app: &App, frame: &mut Frame, area: Rect) {
         AppState::FilterInput => &[("⏎", "apply"), ("esc", "clear"), ("⌫", "delete")],
         AppState::RawLog => &[("↑↓", "scroll"), ("esc", "exit")],
         AppState::ThemePicker => &[("↑↓", "preview"), ("⏎", "apply"), ("esc", "cancel")],
+        AppState::UpdatePopup => &[("esc", "dismiss")],
     };
 
     let help = Paragraph::new(hint_line(pairs)).block(theme::bar_block());

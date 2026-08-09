@@ -80,6 +80,9 @@ pub enum AppState {
     /// Plain, borderless log view with mouse capture released so the terminal
     /// can select text.
     RawLog,
+    /// What happened when the update badge was clicked, with the URL to copy
+    /// by hand if the terminal ignored the clipboard escape.
+    UpdatePopup,
 }
 
 /// Which dashboard panel currently holds keyboard focus. Drives the accent
@@ -297,6 +300,17 @@ impl App {
             theme::set(theme);
         }
         self.state = AppState::Normal;
+    }
+
+    /// Clicking the update badge. A browser opens silently where there is one.
+    /// On a login node there isn't, so the URL goes to the terminal's clipboard
+    /// and the popup says so and shows it.
+    pub fn open_update_page(&mut self) {
+        if let crate::update::OpenOutcome::Copied =
+            crate::update::open_url(crate::update::CRATES_URL)
+        {
+            self.state = AppState::UpdatePopup;
+        }
     }
 
     /// Sample the selected job's log size for the activity heartbeat. Resets the

@@ -3,6 +3,16 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-10
+
+### Fixed
+- Clicking the update badge over SSH no longer sprays `xdg-open` errors across the
+  screen. The opener now runs with its output closed, and a host with no browser is
+  detected before it runs at all
+- On a host with no browser, the update badge copies the crates.io link to the clipboard
+  of your own terminal over OSC 52, and shows a dismissable popup with the link in it.
+  tmux and screen need clipboard passthrough turned on for the copy to reach you
+
 ## [0.5.0] - 2026-08-10
 
 ### Added

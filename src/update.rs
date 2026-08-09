@@ -5,7 +5,9 @@
 //! silent `None`. A version check must never disrupt or slow down the TUI, and
 //! on a locked-down login node it simply finds nothing and moves on.
 
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -128,9 +130,39 @@ fn write_cache(latest: &str) {
     let _ = std::fs::write(path, body.to_string());
 }
 
-/// Best-effort open of `url` in the platform browser. Fire-and-forget: on a
-/// headless login node there may be no opener, and that is fine.
-pub fn open_url(url: &str) {
+/// What opening a URL managed to do.
+pub enum OpenOutcome {
+    /// A browser was launched on this machine.
+    Opened,
+    /// No browser worth launching, so the URL went to the terminal's clipboard.
+    Copied,
+}
+
+/// Open `url` in the platform browser, or hand it to the terminal instead.
+///
+/// On a login node there is no browser, and `xdg-open` says so by printing a
+/// "command not found" line per candidate. Those go to the tty the TUI draws
+/// on, so they land in the middle of the frame. The child gets closed stdio to
+/// stop that, and a headless host skips the opener entirely.
+pub fn open_url(url: &str) -> OpenOutcome {
+    if has_display() && spawn_opener(url) {
+        return OpenOutcome::Opened;
+    }
+    copy_to_terminal_clipboard(url);
+    OpenOutcome::Copied
+}
+
+/// Whether a browser launched here would appear in front of whoever is
+/// watching. Over SSH it would open on the cluster, so this is false unless X
+/// is forwarded.
+fn has_display() -> bool {
+    if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+        return std::env::var_os("SSH_CONNECTION").is_none();
+    }
+    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+fn spawn_opener(url: &str) -> bool {
     let (cmd, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
         ("open", &[])
     } else if cfg!(target_os = "windows") {
@@ -138,12 +170,63 @@ pub fn open_url(url: &str) {
     } else {
         ("xdg-open", &[])
     };
-    let _ = std::process::Command::new(cmd).args(args).arg(url).spawn();
+    std::process::Command::new(cmd)
+        .args(args)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+/// Copy via OSC 52, which asks the terminal emulator to set the clipboard. The
+/// escape travels back down the SSH connection, so the text lands on the
+/// machine you are sitting at rather than the login node. Ghostty, kitty,
+/// WezTerm, iTerm2 and Alacritty honour it. tmux and screen need passthrough
+/// turned on, and there is no reply to tell us either way.
+fn copy_to_terminal_clipboard(text: &str) {
+    let mut out = std::io::stdout().lock();
+    let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    let _ = out.flush();
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let padded = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let word = u32::from(padded[0]) << 16 | u32::from(padded[1]) << 8 | u32::from(padded[2]);
+        for i in 0..4 {
+            match i <= chunk.len() {
+                true => out.push(ALPHABET[(word >> (18 - 6 * i)) as usize & 63] as char),
+                false => out.push('='),
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_pads_every_remainder() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(
+            base64(CRATES_URL.as_bytes()),
+            "aHR0cHM6Ly9jcmF0ZXMuaW8vY3JhdGVzL2xhenlzbHVybQ=="
+        );
+    }
 
     #[test]
     fn parses_plain_and_prefixed_versions() {

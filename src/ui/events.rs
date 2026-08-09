@@ -28,7 +28,20 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::FilterInput => event_filter_input(app, key),
         AppState::RawLog => event_raw_log(app, key),
         AppState::ThemePicker => event_theme_picker(app, key),
+        AppState::UpdatePopup => event_update_popup(app, key),
     }
+}
+
+/// The update notice. Nothing to do but read the URL and dismiss it.
+fn event_update_popup(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(Some(())),
+        (KeyCode::Esc, _) | (KeyCode::Enter, _) | (KeyCode::Char('q'), _) => {
+            app.state = AppState::Normal;
+        }
+        _ => {}
+    }
+    Ok(None)
 }
 
 /// Theme picker; moving the selection applies it, so Esc has to put the old
@@ -342,12 +355,12 @@ fn handle_mouse_event(app: &mut App, mouse: MouseEvent, area: Rect) {
         return;
     }
 
-    // Clicking the update badge opens the crates.io page.
+    // Clicking the update badge opens the crates.io page, or copies its URL.
     if let MouseEventKind::Down(_) = mouse.kind
         && let Some(badge) = update_badge_rect(app, dashboard_rows(area)[0])
         && badge.contains(Position::new(mouse.column, mouse.row))
     {
-        crate::update::open_url(crate::update::CRATES_URL);
+        app.open_update_page();
         return;
     }
 

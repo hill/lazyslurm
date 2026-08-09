@@ -373,6 +373,23 @@ fn cancel_popup_shows_confirm_help_inside_window() {
     assert!(text.contains("confirm"), "y/n help shown inside the popup");
 }
 
+/// The popup has to carry the URL itself. It is what you fall back to when the
+/// terminal drops the clipboard escape, and there is no browser to open.
+#[test]
+fn update_popup_shows_the_url_and_the_new_version() {
+    let mut app = App::new();
+    app.update_available = Some("9.9.9".into());
+    app.state = AppState::UpdatePopup;
+
+    let text = rendered_text(&app);
+    assert!(
+        text.contains("https://crates.io/crates/lazyslurm"),
+        "URL shown so it can be copied by hand"
+    );
+    assert!(text.contains("v9.9.9"), "new version shown");
+    assert!(text.contains("dismiss"), "the way out is shown");
+}
+
 #[test]
 fn raw_log_view_shows_plain_log() {
     use std::io::Write;
