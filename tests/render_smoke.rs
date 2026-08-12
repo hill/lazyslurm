@@ -272,6 +272,7 @@ fn sample_detail() -> AcctDetail {
         end: "2026-06-25T09:30:12".into(),
         elapsed: "00:30:12".into(),
         work_dir: "/home/ada/runs".into(),
+        std_out: "".into(),
     }
 }
 

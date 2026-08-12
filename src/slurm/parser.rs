@@ -183,10 +183,14 @@ impl SlurmParser {
         paths
     }
 
-    /// Best-effort default log paths for a finished job. A job that used a
-    /// custom `--output` path won't be found here.
-    pub fn get_acct_log_paths(work_dir: &str, job_id: &str) -> Vec<String> {
+    /// Best-effort default log paths for a finished job. The optional
+    /// `std_out` from sacct is tried first, then the conventional SLURM
+    /// patterns inside `work_dir` and `/tmp`.
+    pub fn get_acct_log_paths(work_dir: &str, std_out: &str, job_id: &str) -> Vec<String> {
         let mut paths = Vec::new();
+        if !std_out.is_empty() {
+            paths.push(std_out.to_string());
+        }
         if !work_dir.is_empty() {
             paths.push(format!("{work_dir}/slurm-{job_id}.out"));
             paths.push(format!("{work_dir}/slurm-{job_id}.err"));
@@ -351,7 +355,7 @@ impl SlurmParser {
 
         for line in output.lines() {
             let f: Vec<&str> = line.split('|').collect();
-            if f.len() < 17 {
+            if f.len() < 18 {
                 continue;
             }
 
@@ -374,6 +378,7 @@ impl SlurmParser {
                     end: f[14].trim().to_string(),
                     elapsed: f[15].trim().to_string(),
                     work_dir: f[16].trim().to_string(),
+                    std_out: f[17].trim().to_string(),
                 });
             }
 
@@ -491,19 +496,20 @@ mod cluster_tests {
     #[test]
     fn detail_folds_maxrss_from_the_step_row() {
         // Allocation row has no MaxRSS; the .batch step carries 2072K.
-        let raw = "2|acct_test_1|root|root|debug|node01|2|4Gn||00:00.002|COMPLETED|0:0|2026-06-25T02:22:47|2026-06-25T02:22:48|2026-06-25T02:22:53|00:00:05|/workspace\n\
-                   2.batch|batch|||||2||2072K|00:00.002|COMPLETED|0:0|2026-06-25T02:22:48|2026-06-25T02:22:48|2026-06-25T02:22:53|00:00:05|\n";
+        let raw = "2|acct_test_1|root|root|debug|node01|2|4Gn||00:00.002|COMPLETED|0:0|2026-06-25T02:22:47|2026-06-25T02:22:48|2026-06-25T02:22:53|00:00:05|/workspace|/workspace/stdout.log\n\
+                    2.batch|batch|||||2||2072K|00:00.002|COMPLETED|0:0|2026-06-25T02:22:48|2026-06-25T02:22:48|2026-06-25T02:22:53|00:00:05||\n";
         let d = SlurmParser::parse_sacct_detail(raw, "2").expect("allocation row present");
         assert_eq!(d.name, "acct_test_1");
         assert_eq!(d.alloc_cpus, "2");
         assert_eq!(d.req_mem, "4Gn");
         assert_eq!(d.work_dir, "/workspace");
         assert_eq!(d.max_rss.as_deref(), Some("2072K"));
+        assert_eq!(d.std_out, "/workspace/stdout.log");
     }
 
     #[test]
     fn detail_is_none_without_allocation_row() {
-        let raw = "9.batch|batch|||||2||500K|00:00.001|COMPLETED|0:0|x|x|x|00:00:01|\n";
+        let raw = "9.batch|batch|||||2||500K|00:00.001|COMPLETED|0:0|x|x|x|00:00:01||\n";
         assert!(SlurmParser::parse_sacct_detail(raw, "9").is_none());
     }
 
